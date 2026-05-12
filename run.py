@@ -268,6 +268,30 @@ def _render_models_table_rows(target_folder: str) -> str:
     return "\n".join(rows)
 
 
+def _render_model_options(target_folder: str) -> str:
+    """Render <option> elements for a <select> dropdown of available models."""
+    options = []
+    try:
+        if os.path.isdir(target_folder):
+            for fname in sorted(os.listdir(target_folder)):
+                if not fname.endswith(".onnx"):
+                    continue
+                full = os.path.join(target_folder, fname)
+                size_mb = os.path.getsize(full) / (1024 * 1024)
+                onnx_name = fname
+                selected = ' selected' if full == _model_path else ''
+                options.append(
+                    f'<option value="{html_mod.escape(onnx_name)}"{selected}>'
+                    f'{html_mod.escape(onnx_name)} ({size_mb:.1f} MB)'
+                    f'</option>'
+                )
+    except OSError:
+        pass
+    if not options:
+        return '<option value="">– Keine Modelle gefunden –</option>'
+    return "\n".join(options)
+
+
 def _render_html() -> str:
     """Render the web UI guide page."""
     host_url = request.host_url.rstrip("/")
@@ -322,27 +346,104 @@ def _render_html() -> str:
 
 <h1>🔊 Piper TTS</h1>
 
-<!-- ─── Quick form ─── -->
-<h2>Sofort testen</h2>
-<form method="get" action="{host_url}/">
-  <label for="text">Text eingeben:</label>
+<!-- ─── Combined quick-test + voice switch ─── -->
+<h2>Stimme testen</h2>
+<form action="{host_url}/" method="get" id="synth-form">
+  <label for="model-select">Stimme (lokal verfügbar):</label>
+  <select name="model" id="model-select"
+          style="width:100%;padding:10px;border:1px solid #333;border-radius:6px;
+                 background:#0f3460;color:#e0e0e0;font-size:15px;">
+    {_render_model_options(target_folder=os.environ.get("MODEL_TARGET_FOLDER", "/app/models"))}
+  </select>
+  <div style="margin-top:4px;color:#888;font-size:13px;">
+    Aktuell: {html_mod.escape(os.path.basename(_model_path or '?'))}
+  </div>
+
+  <label for="text" style="margin-top:16px;">Text eingeben:</label>
   <input type="text" name="text" id="text"
          value="{html_mod.escape(default_text)}"
          placeholder="Dein Text zum Sprechen">
-  <button type="submit">🔊 Synthetisieren &amp; Download</button>
+
+  <div style="display:flex;gap:12px;margin-top:10px;">
+    <div style="flex:1;">
+      <label for="length-scale" style="font-size:13px;">length_scale</label>
+      <input type="text" name="length_scale" id="length-scale"
+             placeholder="z.B. 1.2 (Default aus Config)"
+             style="width:100%;padding:8px;border:1px solid #333;border-radius:6px;
+                    background:#0f3460;color:#e0e0e0;font-size:13px;">
+    </div>
+    <div style="flex:1;">
+      <label for="sentence-silence" style="font-size:13px;">sentence_silence</label>
+      <input type="text" name="sentence_silence" id="sentence-silence"
+             placeholder="z.B. 0.3 (Default aus Config)"
+             style="width:100%;padding:8px;border:1px solid #333;border-radius:6px;
+                    background:#0f3460;color:#e0e0e0;font-size:13px;">
+    </div>
+    <div style="flex:1;">
+      <label for="speaker-id" style="font-size:13px;">speaker_id</label>
+      <input type="text" name="speaker_id" id="speaker-id"
+             placeholder="z.B. 0 (Default aus Config)"
+             style="width:100%;padding:8px;border:1px solid #333;border-radius:6px;
+                    background:#0f3460;color:#e0e0e0;font-size:13px;">
+    </div>
+  </div>
+
+  <div id="synth-status" class="loading" style="margin-top:8px;"></div>
+  <button type="submit">🔊 Stimme wechseln &amp; synthetisieren</button>
 </form>
+<script>
+document.getElementById('synth-form').addEventListener('submit', function(e) {{
+  e.preventDefault();
+  var status = document.getElementById('synth-status');
+  var model = document.getElementById('model-select').value;
+  var text = document.getElementById('text').value.trim();
+  if (!text) {{ status.textContent = 'Bitte Text eingeben'; return; }}
+  status.textContent = 'Wechsle Stimme …';
+  var button = this.querySelector('button');
+  button.disabled = true;
+
+  fetch('{host_url}/voice', {{
+    method: 'POST',
+    headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify({{ link: model }})
+  }})
+  .then(function(r) {{ return r.json(); }})
+  .then(function(d) {{
+    if (d.status !== 'ok') {{
+      status.textContent = 'Stimme fehlgeschlagen: ' + (d.error || 'Unbekannt');
+      button.disabled = false;
+      return;
+    }}
+    status.textContent = 'Stimme gewechselt - synthetisiere …';
+    var params = new URLSearchParams();
+    params.set('text', text);
+    var ls = document.getElementById('length-scale').value.trim();
+    var ss = document.getElementById('sentence-silence').value.trim();
+    var sid = document.getElementById('speaker-id').value.trim();
+    if (ls) params.set('length_scale', ls);
+    if (ss) params.set('sentence_silence', ss);
+    if (sid) params.set('speaker_id', sid);
+    window.location.href = '{host_url}/?' + params.toString();
+  }})
+  .catch(function(e) {{
+    status.textContent = e.message;
+    button.disabled = false;
+  }});
+}});
+</script>
 
 <!-- ─── curl / POST usage ─── -->
 <h2>curl</h2>
 <pre>curl -o output.wav "{host_url}/?text=Hallo+Welt"</pre>
+<pre>curl -o output.wav "{host_url}/?text=Hallo+Welt&amp;length_scale=1.2&amp;sentence_silence=0.3"</pre>
 
 <h2>POST (raw body)</h2>
-<pre>curl -X POST "{host_url}/" -d "Hallo Welt" -o output.wav</pre>
+<pre>curl -X POST "{host_url}/?length_scale=1.0" -d "Hallo Welt" -o output.wav</pre>
 
-<h2>Stimme wechseln</h2>
-<pre>curl -X POST "{host_url}/voice" \\
-  -H "Content-Type: application/json" \\
-  -d '{{"link": "{html_mod.escape(default_url)}", "sentence_silence": 1.5}}'</pre>
+<h2>Stimme wechseln (API)</h2>
+<pre>curl -X POST "{host_url}/voice" \
+  -H "Content-Type: application/json" \
+  -d '{{"link": "de_DE-thorsten-high", "sentence_silence": 1.5}}'</pre>
 
 <!-- ─── Current config ─── -->
 <h2>Aktuelle Konfiguration</h2>
@@ -363,37 +464,6 @@ def _render_html() -> str:
 </tr>
 {_render_models_table_rows(target_folder=os.environ.get("MODEL_TARGET_FOLDER", "/app/models"))}
 </table>
-
-<h2>Stimme wechseln (Browser)</h2>
-<form method="post" action="{host_url}/voice" id="voice-switch-form">
-  <label for="voice-link">Model-Name oder URL:</label>
-  <input type="text" name="link" id="voice-link"
-         value="{html_mod.escape(default_ref)}"
-         placeholder="z.B. de_DE-thorsten-high oder en_US-lessac-high">
-  <button type="submit">🔄 Wechseln</button>
-  <div id="voice-result" class="loading"></div>
-</form>
-<script>
-document.getElementById('voice-switch-form').addEventListener('submit', function(e) {{
-  e.preventDefault();
-  var result = document.getElementById('voice-result');
-  result.textContent = 'Wechsle Stimme …';
-  var fd = new FormData(this);
-  fetch('{host_url}/voice', {{ method: 'POST', body: new URLSearchParams(fd) }})
-    .then(r => r.json())
-    .then(d => {{
-      if (d.status === 'ok') {{
-        result.innerHTML = '✅ <strong>' + d.model.split('/').pop() + '</strong> geladen';
-        setTimeout(function(){{ location.reload(); }}, 1500);
-      }} else {{
-        result.textContent = '❌ ' + (d.error || 'Unbekannter Fehler');
-      }}
-    }})
-    .catch(function(e) {{
-      result.textContent = '❌ ' + e.message;
-    }});
-}});
-</script>
 
 </div>
 
