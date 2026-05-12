@@ -219,7 +219,7 @@ def _render_html() -> str:
 
 <!-- ─── Quick form ─── -->
 <h2>Sofort testen</h2>
-<form method="get" action="{{host_url}}/">
+<form method="get" action="{host_url}/">
   <label for="text">Text eingeben:</label>
   <input type="text" name="text" id="text"
          value="{html_mod.escape(default_text)}"
@@ -394,6 +394,49 @@ def health():
         "status": "ok",
         "model_loaded": _voice is not None,
         "model_path": _model_path,
+    })
+
+
+# ── Well-known Piper voices (list for the web UI) ─────────────────
+_WELL_KNOWN_VOICES: list[dict] = [
+    {"name": "de_DE-thorsten-high",      "label": "Thorsten (High)",       "gender": "male",   "language": "Deutsch"},
+    {"name": "de_DE-thorsten-medium",    "label": "Thorsten (Medium)",     "gender": "male",   "language": "Deutsch"},
+    {"name": "de_DE-thorsten-low",       "label": "Thorsten (Low)",        "gender": "male",   "language": "Deutsch"},
+    {"name": "de_DE-thorsten-tesslow",   "label": "Thorsten (Tesseract)",  "gender": "male",   "language": "Deutsch"},
+    {"name": "de_DE-eva_k-x-low",        "label": "Eva K. (X-Low)",        "gender": "female", "language": "Deutsch"},
+    {"name": "de_DE-kerstin-low",        "label": "Kerstin (Low)",         "gender": "female", "language": "Deutsch"},
+    {"name": "de_DE-mls-medium",         "label": "MLS (Medium)",          "gender": "unknown","language": "Deutsch"},
+    {"name": "de_DE-pavoque-low",        "label": "Pavoque (Low)",         "gender": "unknown","language": "Deutsch"},
+    {"name": "de_DE-ramona-low",         "label": "Ramona (Low)",          "gender": "female", "language": "Deutsch"},
+    {"name": "en_GB-alan-low",           "label": "Alan (GB, Low)",        "gender": "male",   "language": "English"},
+    {"name": "en_GB-alan-medium",        "label": "Alan (GB, Medium)",     "gender": "male",   "language": "English"},
+    {"name": "en_US-amy-low",            "label": "Amy (US, Low)",         "gender": "female", "language": "English"},
+    {"name": "en_US-amy-medium",         "label": "Amy (US, Medium)",      "gender": "female", "language": "English"},
+    {"name": "en_US-lessac-medium",      "label": "Lessac (US, Medium)",   "gender": "female", "language": "English"},
+    {"name": "en_US-lessac-high",        "label": "Lessac (US, High)",     "gender": "female", "language": "English"},
+    {"name": "en_US-libritts-high",      "label": "LibriTTS (US, High)",   "gender": "unknown","language": "English"},
+]
+
+
+@app.route("/models", methods=["GET"])
+def list_models():
+    """List available models (files on disk + well-known voices)."""
+    target_folder = os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
+
+    on_disk = []
+    if os.path.isdir(target_folder):
+        for fname in sorted(os.listdir(target_folder)):
+            if fname.endswith(".onnx"):
+                full = os.path.join(target_folder, fname)
+                size_mb = round(os.path.getsize(full) / (1024 * 1024), 1)
+                is_active = (full == _model_path)
+                on_disk.append({"file": fname, "path": full, "size_mb": size_mb, "active": is_active})
+
+    return jsonify({
+        "target_folder": target_folder,
+        "active_model": _model_path,
+        "on_disk": on_disk,
+        "well_known": _WELL_KNOWN_VOICES,
     })
 
 
