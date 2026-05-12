@@ -129,13 +129,8 @@ def _unload_voice():
         _LOGGER.info("Unloading current model...")
         del _voice
         _voice = None
-        # Clear CUDA cache if available
-        try:
-            import torch
-            torch.cuda.empty_cache()
-            _LOGGER.info("CUDA cache cleared")
-        except ImportError:
-            pass
+        # CUDA-Cache wird von onnxruntime beim Session-Close automatisch geräumt
+        # torch.cuda.empty_cache() entfällt – PyTorch ist nicht installiert
 
 
 def load_voice(
@@ -154,8 +149,8 @@ def load_voice(
 
     if use_cuda:
         try:
-            import torch
-            use_cuda = torch.cuda.is_available()
+            import onnxruntime
+            use_cuda = "CUDAExecutionProvider" in onnxruntime.get_available_providers()
             _LOGGER.info("CUDA available: %s", use_cuda)
         except ImportError:
             use_cuda = False
