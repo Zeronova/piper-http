@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
 
 ARG BUILD_DATE
 
@@ -18,9 +18,9 @@ WORKDIR /piper-src/src/python_run
 RUN python3 -m pip install -e ".[http]" --no-cache-dir
 
 # CUDA-Unterstützung: CPU-onnxruntime durch GPU-Version ersetzen
-# Pin <1.21 wegen cuDNN 8 (1.21+ benötigt cuDNN 9) – CUDA 12.2 + cuDNN 8 via Base-Image
+# CUDA 12.3 + cuDNN 9 via Base-Image, onnxruntime-gpu >= 1.21
 RUN python3 -m pip uninstall -y onnxruntime 2>/dev/null; \
-    python3 -m pip install "onnxruntime-gpu>=1.18.0,<1.21" --no-cache-dir
+    python3 -m pip install onnxruntime-gpu --no-cache-dir
 
 # Weitere Hilfsmittel
 RUN python3 -m pip install wget
