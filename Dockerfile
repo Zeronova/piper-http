@@ -1,24 +1,29 @@
-FROM python:3.11-slim
+FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
 
 ARG BUILD_DATE
 
+# Python 3.10 + pip + git (Ubuntu 22.04 default)
+RUN apt update && apt install -y \
+    python3 python3-pip python3-venv \
+    git ffmpeg espeak-ng \
+    && apt clean
+
 # Piper-Source nach /piper-src – NICHT nach /app/piper/,
 # sonst schattet das leere Verzeichnis das echte piper-Package (PEP 420).
-RUN apt update && apt install -y git
 RUN git clone https://github.com/rhasspy/piper /piper-src
-RUN pip install --upgrade pip
+RUN python3 -m pip install --upgrade pip
 
 # Piper-Package installieren (editable inkl. HTTP-Extras)
 WORKDIR /piper-src/src/python_run
-RUN pip install -e ".[http]" --no-cache-dir
+RUN python3 -m pip install -e ".[http]" --no-cache-dir
 
 # CUDA-Unterstützung: CPU-onnxruntime durch GPU-Version ersetzen
-RUN pip uninstall -y onnxruntime 2>/dev/null; \
-    pip install onnxruntime-gpu>=1.17.0 --no-cache-dir
+# Pin <1.21 wegen cuDNN 8 (1.21+ benötigt cuDNN 9) – CUDA 12.2 + cuDNN 8 via Base-Image
+RUN python3 -m pip uninstall -y onnxruntime 2>/dev/null; \
+    python3 -m pip install "onnxruntime-gpu>=1.18.0,<1.21" --no-cache-dir
 
-# Weitere Abhängigkeiten (TTS-Ausgabe, Model-Download)
-RUN apt install -y ffmpeg espeak-ng
-RUN pip install wget
+# Weitere Hilfsmittel
+RUN python3 -m pip install wget
 
 # App-Dateien
 WORKDIR /app
@@ -38,4 +43,4 @@ ENV NOISE_SCALE="0.667"
 ENV NOISE_W="0.8"
 ENV CUDA="true"
 
-CMD ["python", "-u", "/app/run.py"]
+CMD ["python3", "-u", "/app/run.py"]
