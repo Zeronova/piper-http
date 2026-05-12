@@ -4,7 +4,16 @@ services:
     container_name: piper
     ports:
       - "${PIPER_PORT:-5000}:5000"
-    env_file: piper.env
+    environment:
+      MODEL_DOWNLOAD_LINK: ${MODEL_DOWNLOAD_LINK:-https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high/de_DE-thorsten-high.onnx?download=true}
+      MODEL_DEFAULT: ${MODEL_DEFAULT:-de_DE-thorsten-high}
+      MODEL_TARGET_FOLDER: ${MODEL_TARGET_FOLDER:-/app/models}
+      SPEAKER: ${SPEAKER:-0}
+      SENTENCE_SILENCE: ${SENTENCE_SILENCE:-1.5}
+      LENGTH_SCALE: ${LENGTH_SCALE:-1.1}
+      NOISE_SCALE: ${NOISE_SCALE:-0.667}
+      NOISE_W: ${NOISE_W:-0.8}
+      CUDA: ${CUDA:-true}
     volumes:
       - "${PIPER_MODELS_DIR:-./models}:/app/models"
     restart: unless-stopped
