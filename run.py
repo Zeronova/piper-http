@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
 """
-Custom Piper HTTP server with runtime model switching.
-Supports the existing /?text= API and adds POST /voice to switch models.
+Custom Piper HTTP server with runtime model switching and web UI.
+
+Web UI:
+  GET  /                 → HTML guide page (if no ?text=)
+  GET  /?text=Hallo      → WAV download
+  POST /                 → text in body → WAV download
+
+Model switching:
+  GET  /voice            → current model info
+  POST /voice            → switch to new model
+  GET  /health           → status check
 
 Env vars:
   MODEL_DOWNLOAD_LINK   - HuggingFace model URL (used at startup)
+  MODEL_DEFAULT         - default model link shown in web UI
   MODEL_TARGET_FOLDER   - folder to store model files (default: /app/models)
   SPEAKER               - speaker ID (default: 0)
   SENTENCE_SILENCE      - silence between sentences in seconds (default: 0.0)
@@ -22,9 +32,10 @@ import wave
 import logging
 import json
 import atexit
+import html as html_mod
 from pathlib import Path
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 from piper import PiperVoice
 
@@ -38,6 +49,7 @@ _LOGGER = logging.getLogger("piper-http-custom")
 _voice: PiperVoice | None = None
 _model_path: str | None = None
 _synth_args: dict = {}
+_startup_env: dict = {}  # snapshot of env vars for the web UI
 
 
 def download_model(link: str, target_folder: str) -> str:
@@ -84,10 +96,8 @@ def load_voice(
     """Load (or switch to) a new voice model."""
     global _voice, _model_path, _synth_args
 
-    # First, fully unload the old one
     _unload_voice()
 
-    # Check if cuda is actually available
     if use_cuda:
         try:
             import torch
@@ -99,7 +109,6 @@ def load_voice(
     _LOGGER.info("Loading model: %s (cuda=%s)", model_path, use_cuda)
     voice = PiperVoice.load(model_path, use_cuda=use_cuda)
 
-    # Build the synthesis-arguments dict (only non-None values)
     _synth_args = {
         k: v
         for k, v in {
@@ -119,6 +128,111 @@ def load_voice(
 
 
 # ---------------------------------------------------------------------------
+# HTML guide page
+# ---------------------------------------------------------------------------
+
+def _render_html() -> str:
+    """Render the web UI guide page."""
+    host_url = request.host_url.rstrip("/")
+    current = _synth_args.copy()
+    current["model_path"] = _model_path
+
+    env = _startup_env
+    default_model = env.get("MODEL_DEFAULT", "–")
+    default_text = "Hallo Welt, das ist ein Test."  # placeholder fallback
+
+    return f"""<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Piper TTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #1a1a2e; color: #e0e0e0; margin: 0; padding: 20px;
+    line-height: 1.6;
+  }}
+  .container {{ max-width: 800px; margin: 0 auto; }}
+  h1 {{ color: #00d4aa; border-bottom: 2px solid #00d4aa; padding-bottom: 8px; }}
+  h2 {{ color: #ffd369; margin-top: 2em; }}
+  pre {{
+    background: #16213e; color: #a8d8ea; padding: 14px; border-radius: 8px;
+    overflow-x: auto; font-size: 14px;
+  }}
+  code {{ background: #16213e; padding: 2px 6px; border-radius: 4px; }}
+  form {{ background: #16213e; padding: 20px; border-radius: 8px; margin: 1em 0; }}
+  label {{ display: block; margin-bottom: 6px; font-weight: bold; }}
+  input[type=text] {{
+    width: 100%; padding: 10px; border: 1px solid #333; border-radius: 6px;
+    background: #0f3460; color: #e0e0e0; font-size: 15px;
+  }}
+  button {{
+    background: #00d4aa; color: #1a1a2e; border: none; padding: 10px 24px;
+    border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer;
+    margin-top: 10px;
+  }}
+  button:hover {{ background: #00f0c0; }}
+  .badge {{ color: #ffd369; font-weight: normal; }}
+  .loading {{ color: #888; }}
+  #config-display {{ white-space: pre-wrap; }}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🔊 Piper TTS</h1>
+
+<!-- ─── Quick form ─── -->
+<h2>Sofort testen</h2>
+<form method="get" action="{{host_url}}/">
+  <label for="text">Text eingeben:</label>
+  <input type="text" name="text" id="text"
+         value="{html_mod.escape(default_text)}"
+         placeholder="Dein Text zum Sprechen">
+  <button type="submit">🔊 Synthetisieren &amp; Download</button>
+</form>
+
+<!-- ─── curl / POST usage ─── -->
+<h2>curl</h2>
+<pre>curl -o output.wav "{host_url}/?text=Hallo+Welt"</pre>
+
+<h2>POST (raw body)</h2>
+<pre>curl -X POST "{host_url}/" -d "Hallo Welt" -o output.wav</pre>
+
+<h2>Stimme wechseln</h2>
+<pre>curl -X POST "{host_url}/voice" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"link": "{html_mod.escape(default_model)}", "sentence_silence": 1.5}}'</pre>
+
+<!-- ─── Current config ─── -->
+<h2>Aktuelle Konfiguration</h2>
+<pre id="config-display">Lade…</pre>
+
+<!-- ─── Default model ─── -->
+<p><strong>Default-Model:</strong> <code>{html_mod.escape(default_model)}</code></p>
+
+</div>
+
+<script>
+fetch('{host_url}/voice')
+  .then(r => r.json())
+  .then(d => {{
+    document.getElementById('config-display').textContent =
+      JSON.stringify(d, null, 2);
+  }})
+  .catch(e => {{
+    document.getElementById('config-display').textContent =
+      'Fehler: ' + e.message;
+  }});
+</script>
+
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------------
 
@@ -127,14 +241,19 @@ app = Flask(__name__)
 
 @app.route("/", methods=["GET", "POST"])
 def handle_synthesize():
-    """Synthesise speech from text.  Compatible with the original piper HTTP API.
-
-    GET  /?text=Hello   → synthesise "Hello"
-    POST /              → read text from request body
+    """
+    GET  /              → HTML guide page (browser)
+    GET  /?text=Hallo   → WAV download
+    POST /              → text in body → WAV download
     """
     if _voice is None:
         return "No voice model loaded", 503
 
+    # ── Browser: no text parameter → show guide page ──
+    if request.method == "GET" and not request.args.get("text"):
+        return _render_html()
+
+    # ── Extract text ──
     text = (
         request.data.decode("utf-8")
         if request.method == "POST"
@@ -142,6 +261,9 @@ def handle_synthesize():
     ).strip()
 
     if not text:
+        # POST without body → guide page
+        if request.method == "POST":
+            return _render_html()
         return "No text provided", 400
 
     _LOGGER.debug("Synthesising: %s", text)
@@ -149,7 +271,16 @@ def handle_synthesize():
         with io.BytesIO() as wav_io:
             with wave.open(wav_io, "wb") as wav_file:
                 _voice.synthesize(text, wav_file, **_synth_args)
-            return wav_io.getvalue()
+            wav_data = wav_io.getvalue()
+
+        return Response(
+            wav_data,
+            mimetype="audio/wav",
+            headers={
+                "Content-Disposition": 'attachment; filename="piper-tts.wav"',
+                "Content-Length": str(len(wav_data)),
+            },
+        )
     except Exception as exc:
         _LOGGER.error("Synthesis failed: %s", exc)
         return f"Synthesis error: {exc}", 500
@@ -159,7 +290,7 @@ def handle_synthesize():
 def handle_voice():
     """Get or switch the current voice model.
 
-    GET  /voice         → return current model path + synthesis config
+    GET  /voice         → current model path + synthesis config
     POST /voice         → switch to a new model
 
     POST JSON payload:
@@ -183,7 +314,6 @@ def handle_voice():
     # --- POST: switch voice ---
     data = request.get_json(silent=True)
     if not data:
-        # also accept form-encoded
         data = request.form.to_dict()
 
     link = data.get("link") or data.get("model_path")
@@ -229,6 +359,14 @@ def health():
 # ---------------------------------------------------------------------------
 
 def main():
+    # Snapshot env for web UI
+    global _startup_env
+    _startup_env = {k: v for k, v in os.environ.items() if k.startswith("MODEL_")}
+    # Also snapshot the synthesis env vars
+    for key in ("SPEAKER", "SENTENCE_SILENCE", "LENGTH_SCALE", "NOISE_SCALE", "NOISE_W", "CUDA"):
+        if key in os.environ:
+            _startup_env[key] = os.environ[key]
+
     # Read environment
     link = os.environ.get("MODEL_DOWNLOAD_LINK", "")
     target_folder = os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
@@ -242,7 +380,7 @@ def main():
     use_cuda = cuda_str.lower() in ("true", "1", "yes")
     speaker_id = int(speaker_str) if speaker_str and speaker_str != "none" else None
 
-    # Auto-download model at startup (if link is provided)
+    # Auto-download & load model at startup
     if link:
         model_path = download_model(link, target_folder)
         load_voice(
@@ -260,7 +398,6 @@ def main():
             "Use POST /voice to load one later."
         )
 
-    # Clean up on exit
     atexit.register(_unload_voice)
 
     _LOGGER.info("Starting Piper HTTP on 0.0.0.0:5000")

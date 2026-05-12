@@ -7,6 +7,7 @@ services:
     environment:
       # ── Initial model ─────────────────────────────────────────────
       MODEL_DOWNLOAD_LINK: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/jarvis/high/de_DE-jarvis-high.onnx?download=true"
+      MODEL_DEFAULT: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/jarvis/high/de_DE-jarvis-high.onnx?download=true"
       MODEL_TARGET_FOLDER: "/app/models"
       SPEAKER: "0"
       # ── TTS parameters ───────────────────────────────────────────
