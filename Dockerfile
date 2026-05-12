@@ -8,11 +8,13 @@ RUN apt update && apt install -y git
 RUN git clone https://github.com/rhasspy/piper /piper-src
 RUN pip install --upgrade pip
 
-# Piper-Package installieren (editable)
+# Piper-Package installieren (editable inkl. HTTP-Extras)
 WORKDIR /piper-src/src/python_run
-RUN pip install -e . --no-cache-dir
-RUN pip install -r requirements.txt --no-cache-dir
-RUN pip install -r requirements_http.txt --no-cache-dir
+RUN pip install -e ".[http]" --no-cache-dir
+
+# CUDA-Unterstützung: CPU-onnxruntime durch GPU-Version ersetzen
+RUN pip uninstall -y onnxruntime 2>/dev/null; \
+    pip install onnxruntime-gpu>=1.17.0 --no-cache-dir
 
 # Weitere Abhängigkeiten (TTS-Ausgabe, Model-Download)
 RUN apt install -y ffmpeg espeak-ng

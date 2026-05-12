@@ -414,7 +414,7 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
       button.disabled = false;
       return;
     }}
-    status.textContent = 'Stimme gewechselt - synthetisiere …';
+    status.textContent = 'Synthetisiere …';
     var params = new URLSearchParams();
     params.set('text', text);
     var ls = document.getElementById('length-scale').value.trim();
@@ -423,7 +423,15 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
     if (ls) params.set('length_scale', ls);
     if (ss) params.set('sentence_silence', ss);
     if (sid) params.set('speaker_id', sid);
-    window.location.href = '{host_url}/?' + params.toString();
+    // Download auslösen ohne die Seite zu verlassen
+    var a = document.createElement('a');
+    a.href = '{host_url}/?' + params.toString();
+    a.download = 'piper-tts.wav';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    status.textContent = '✅ Synthese fertig – Datei wird heruntergeladen';
+    button.disabled = false;
   }})
   .catch(function(e) {{
     status.textContent = e.message;
