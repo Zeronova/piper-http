@@ -32,6 +32,7 @@ import wave
 import logging
 import json
 import atexit
+import threading
 import html as html_mod
 from pathlib import Path
 
@@ -53,13 +54,34 @@ _startup_env: dict = {}  # snapshot of env vars for the web UI
 
 
 def download_model(link: str, target_folder: str) -> str:
-    """Download model.onnx (+ .json) from huggingface if not already cached."""
+    """Download model (.onnx + .json) from huggingface if not already cached.
+
+    Uses the original filename from the download URL (e.g. ``de_DE-thorsten-high.onnx``).
+    Falls back to the old ``model.onnx`` for backward compatibility.
+    Returns the path to the downloaded model file.
+    """
     script_folder = os.path.dirname(os.path.realpath(__file__))
     download_script = os.path.join(script_folder, "download/download-piper-voices.py")
-    model_path = os.path.join(target_folder, "model.onnx")
 
+    # Extract the intended filename from the download URL
+    from urllib.parse import urlparse
+    model_basename = os.path.basename(urlparse(link).path)  # "de_DE-thorsten-high.onnx?download=true" → "de_DE-thorsten-high.onnx"
+    if not model_basename.endswith(".onnx"):
+        model_basename = "model.onnx"  # fallback
+
+    model_path = os.path.join(target_folder, model_basename)
+    legacy_path = os.path.join(target_folder, "model.onnx")
+
+    # Check cache: prefer the original filename, fall back to legacy
     if os.path.exists(model_path):
         _LOGGER.info("Model already exists at %s – skipping download", model_path)
+    elif os.path.exists(legacy_path):
+        _LOGGER.info("Using legacy model.onnx – renaming to %s", model_basename)
+        os.rename(legacy_path, model_path)
+        legacy_json = os.path.join(target_folder, "model.onnx.json")
+        model_json = model_path + ".json"
+        if os.path.exists(legacy_json):
+            os.rename(legacy_json, model_json)
     else:
         _LOGGER.info("Downloading model from %s", link)
         os.makedirs(target_folder, exist_ok=True)
@@ -159,9 +181,92 @@ def load_voice(
     return voice
 
 
+# ── Helpers for model switching ─────────────────────────────
+
+def _arg_float(val: str | None, default: float | None = None) -> float | None:
+    """Parse a query-string float, returning *default* on missing/empty."""
+    if val is None or val.strip() == "":
+        return default
+    try:
+        return float(val.strip())
+    except (ValueError, TypeError):
+        return default
+
+
+_model_lock = threading.Lock()
+
+
+def _switch_voice(
+    link: str = "",
+    target_folder: str | None = None,
+    use_cuda: bool = True,
+    speaker_id: int | None = None,
+    length_scale: float | None = None,
+    noise_scale: float | None = None,
+    noise_w: float | None = None,
+    sentence_silence: float | None = 0.0,
+) -> tuple[Response, int]:
+    """Download & load a new Piper voice.  Returns a JSON response tuple."""
+    with _model_lock:
+        link = link.strip()
+        if not link:
+            default_ref = os.environ.get("MODEL_DEFAULT", "")
+            if not default_ref:
+                return jsonify({"error": "Missing model ref or MODEL_DEFAULT"}), 400
+            link = resolve_model_ref(default_ref)
+
+        target_folder = target_folder or os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
+
+        try:
+            model_path = download_model(link, target_folder)
+        except Exception as exc:
+            _LOGGER.error("Download failed: %s", exc)
+            return jsonify({"error": f"Download failed: {exc}"}), 500
+
+        try:
+            load_voice(
+                model_path,
+                use_cuda=use_cuda,
+                speaker_id=speaker_id,
+                length_scale=length_scale,
+                noise_scale=noise_scale,
+                noise_w=noise_w,
+                sentence_silence=sentence_silence,
+            )
+            return jsonify({"status": "ok", "model": str(model_path)}), 200
+        except Exception as exc:
+            _LOGGER.error("Loading model failed: %s", exc)
+            return jsonify({"error": f"Failed to load model: {exc}"}), 500
+
+
 # ---------------------------------------------------------------------------
 # HTML guide page
 # ---------------------------------------------------------------------------
+
+def _render_models_table_rows(target_folder: str) -> str:
+    """Render table rows for .onnx files in the model folder."""
+    rows = []
+    try:
+        if os.path.isdir(target_folder):
+            for fname in sorted(os.listdir(target_folder)):
+                if not fname.endswith(".onnx"):
+                    continue
+                full = os.path.join(target_folder, fname)
+                size_mb = os.path.getsize(full) / (1024 * 1024)
+                active = "✅" if full == _model_path else "–"
+                rows.append(
+                    f'<tr style="border-bottom:1px solid #222;">'
+                    f'<td style="padding:4px 8px;">{html_mod.escape(fname)}</td>'
+                    f'<td style="padding:4px 8px;">{size_mb:.1f} MB</td>'
+                    f'<td style="padding:4px 8px;">{active}</td>'
+                    f'</tr>'
+                )
+    except OSError:
+        pass
+    if not rows:
+        return '<tr><td colspan="3" style="padding:8px; color:#888;">Keine Modelle gefunden</td></tr>'
+    return "\n".join(rows)
+
 
 def _render_html() -> str:
     """Render the web UI guide page."""
@@ -247,6 +352,49 @@ def _render_html() -> str:
 <p><strong>Default-Model:</strong> <code>{html_mod.escape(default_ref)}</code></p>
 <p><strong>→ URL:</strong> <code>{html_mod.escape(default_url)}</code></p>
 
+<!-- ─── Verfuegbare Modelle ─── -->
+<h2>Verfügbare Modelle</h2>
+<p><code><a href="{host_url}/models">GET /models</a></code> – API-Liste aller Modelle</p>
+<table style="width:100%; border-collapse: collapse;">
+<tr style="border-bottom:1px solid #333; text-align:left;">
+  <th style="padding:4px 8px;">Datei</th>
+  <th style="padding:4px 8px;">Grösse</th>
+  <th style="padding:4px 8px;">Aktiv</th>
+</tr>
+{_render_models_table_rows(target_folder=os.environ.get("MODEL_TARGET_FOLDER", "/app/models"))}
+</table>
+
+<h2>Stimme wechseln (Browser)</h2>
+<form method="post" action="{host_url}/voice" id="voice-switch-form">
+  <label for="voice-link">Model-Name oder URL:</label>
+  <input type="text" name="link" id="voice-link"
+         value="{html_mod.escape(default_ref)}"
+         placeholder="z.B. de_DE-thorsten-high oder en_US-lessac-high">
+  <button type="submit">🔄 Wechseln</button>
+  <div id="voice-result" class="loading"></div>
+</form>
+<script>
+document.getElementById('voice-switch-form').addEventListener('submit', function(e) {{
+  e.preventDefault();
+  var result = document.getElementById('voice-result');
+  result.textContent = 'Wechsle Stimme …';
+  var fd = new FormData(this);
+  fetch('{host_url}/voice', {{ method: 'POST', body: new URLSearchParams(fd) }})
+    .then(r => r.json())
+    .then(d => {{
+      if (d.status === 'ok') {{
+        result.innerHTML = '✅ <strong>' + d.model.split('/').pop() + '</strong> geladen';
+        setTimeout(function(){{ location.reload(); }}, 1500);
+      }} else {{
+        result.textContent = '❌ ' + (d.error || 'Unbekannter Fehler');
+      }}
+    }})
+    .catch(function(e) {{
+      result.textContent = '❌ ' + e.message;
+    }});
+}});
+</script>
+
 </div>
 
 <script>
@@ -324,8 +472,9 @@ def handle_synthesize():
 def handle_voice():
     """Get or switch the current voice model.
 
-    GET  /voice         → current model path + synthesis config
-    POST /voice         → switch to a new model
+    GET  /voice                      → current model path + synthesis config
+    GET  /voice?model=de_DE-thorsten-high  → switch model by name (query params)
+    POST /voice                     → switch model (JSON body)
 
     POST JSON payload (all optional):
     {
@@ -343,6 +492,22 @@ def handle_voice():
     the voice defined by the ``MODEL_DEFAULT`` env var.
     """
     if request.method == "GET":
+        # ?model= → switch model
+        model_param = request.args.get("model", "").strip()
+        if model_param:
+            resp, code = _switch_voice(
+                link=model_param,
+                target_folder=request.args.get("target_folder"),
+                use_cuda=(request.args.get("cuda") or "").lower() in ("true", "1", "yes"),
+                speaker_id=int(request.args["speaker_id"]) if request.args.get("speaker_id") else None,
+                length_scale=_arg_float(request.args.get("length_scale")),
+                noise_scale=_arg_float(request.args.get("noise_scale")),
+                noise_w=_arg_float(request.args.get("noise_w")),
+                sentence_silence=_arg_float(request.args.get("sentence_silence"), default=0.0),
+            )
+            return resp, code
+
+        # Otherwise just show current state
         return jsonify({
             "model_path": _model_path,
             "synthesis_config": _synth_args,
@@ -353,38 +518,24 @@ def handle_voice():
     if not data:
         data = request.form.to_dict()
 
-    link = (data.get("link") or data.get("model_path") or "").strip()
+    # Coerce cuda from string if necessary
+    cuda_val = data.get("cuda", True)
+    if isinstance(cuda_val, str):
+        use_cuda = cuda_val.lower() in ("true", "1", "yes")
+    else:
+        use_cuda = bool(cuda_val)
 
-    # Fallback to MODEL_DEFAULT when no link was provided
-    if not link:
-        default_ref = os.environ.get("MODEL_DEFAULT", "")
-        if not default_ref:
-            return jsonify({"error": "Missing 'link'. Set MODEL_DEFAULT env var or pass a link."}), 400
-        link = resolve_model_ref(default_ref)
-        _LOGGER.info("No link provided – falling back to MODEL_DEFAULT: %s", link)
-
-    target_folder = data.get("target_folder", "/app/models")
-
-    try:
-        model_path = download_model(link, target_folder)
-    except Exception as exc:
-        _LOGGER.error("Download failed: %s", exc)
-        return jsonify({"error": f"Download failed: {exc}"}), 500
-
-    try:
-        load_voice(
-            model_path,
-            use_cuda=data.get("cuda", True),
-            speaker_id=data.get("speaker_id"),
-            length_scale=data.get("length_scale"),
-            noise_scale=data.get("noise_scale"),
-            noise_w=data.get("noise_w"),
-            sentence_silence=data.get("sentence_silence", 0.0),
-        )
-        return jsonify({"status": "ok", "model": str(model_path)})
-    except Exception as exc:
-        _LOGGER.error("Loading model failed: %s", exc)
-        return jsonify({"error": f"Failed to load model: {exc}"}), 500
+    resp, code = _switch_voice(
+        link=data.get("link") or data.get("model_path") or "",
+        target_folder=data.get("target_folder"),
+        use_cuda=use_cuda,
+        speaker_id=data.get("speaker_id"),
+        length_scale=data.get("length_scale"),
+        noise_scale=data.get("noise_scale"),
+        noise_w=data.get("noise_w"),
+        sentence_silence=data.get("sentence_silence", 0.0),
+    )
+    return resp, code
 
 
 @app.route("/health", methods=["GET"])
