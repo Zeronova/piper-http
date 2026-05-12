@@ -1,44 +1,39 @@
 FROM python:3.11-slim
 
-# Set the working directory
-WORKDIR /app
+ARG BUILD_DATE
 
-# Get the latest version of the code
+# Piper-Source nach /piper-src – NICHT nach /app/piper/,
+# sonst schattet das leere Verzeichnis das echte piper-Package (PEP 420).
 RUN apt update && apt install -y git
-RUN git clone https://github.com/rhasspy/piper
-
-# Update pip and install the required packages
+RUN git clone https://github.com/rhasspy/piper /piper-src
 RUN pip install --upgrade pip
 
-# Set the working directory
-WORKDIR /app/piper/src/python_run
+# Piper-Package installieren (editable)
+WORKDIR /piper-src/src/python_run
+RUN pip install -e . --no-cache-dir
+RUN pip install -r requirements.txt --no-cache-dir
+RUN pip install -r requirements_http.txt --no-cache-dir
 
-# Install the package
-RUN pip install -e .
-
-# Install the requirements
-RUN pip install -r requirements.txt
-
-# Install http server
-RUN pip install -r requirements_http.txt
-
-# Install wget pip package
+# Weitere Abhängigkeiten (TTS-Ausgabe, Model-Download)
+RUN apt install -y ffmpeg espeak-ng
 RUN pip install wget
 
-# Copy the run.py file into the container
+# App-Dateien
+WORKDIR /app
 COPY run.py /app
-# Copy the download folder into the container
 COPY download /app/download
 
-# Expose the port 5000
 EXPOSE 5000
 
 # ── Environment variables (defaults) ──────────────────────────────────
-ENV MODEL_DOWNLOAD_LINK="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/pavoque/low/de_DE-pavoque-low.onnx?download=true"
+ENV MODEL_DOWNLOAD_LINK="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high/de_DE-thorsten-high.onnx?download=true"
+ENV MODEL_DEFAULT="de_DE-thorsten-high"
 ENV MODEL_TARGET_FOLDER="/app/models"
 ENV SPEAKER="0"
 ENV SENTENCE_SILENCE="0.0"
+ENV LENGTH_SCALE="1.1"
+ENV NOISE_SCALE="0.667"
+ENV NOISE_W="0.8"
 ENV CUDA="true"
 
-# Start the custom HTTP server
 CMD ["python", "-u", "/app/run.py"]
