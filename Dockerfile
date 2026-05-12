@@ -36,7 +36,7 @@ EXPOSE 5000
 ENV MODEL_DOWNLOAD_LINK="https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/high/de_DE-thorsten-high.onnx?download=true"
 ENV MODEL_DEFAULT="de_DE-thorsten-high"
 ENV MODEL_TARGET_FOLDER="/app/models"
-ENV SPEAKER="0"
+ENV SPEAKER="1"
 ENV SENTENCE_SILENCE="0.0"
 ENV LENGTH_SCALE="1.1"
 ENV NOISE_SCALE="0.667"

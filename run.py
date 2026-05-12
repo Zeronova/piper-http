@@ -16,10 +16,10 @@ Env vars:
   MODEL_DOWNLOAD_LINK   - HuggingFace model URL (used at startup)
   MODEL_DEFAULT         - default model link shown in web UI
   MODEL_TARGET_FOLDER   - folder to store model files (default: /app/models)
-  SPEAKER               - speaker ID (default: 0)
-  SENTENCE_SILENCE      - silence between sentences in seconds (default: 0.0)
+  SPEAKER               - speaker ID (default: 1)
+  SENTENCE_SILENCE      - silence between sentences in seconds (default: 0.5)
   CUDA                  - enable GPU inference if available (default: true)
-  LENGTH_SCALE          - phoneme length (default: none = Piper default)
+  LENGTH_SCALE          - phoneme length (default: 1.0)
   NOISE_SCALE           - generator noise (default: none = Piper default)
   NOISE_W               - phoneme width noise (default: none = Piper default)
 """
@@ -712,8 +712,8 @@ def main():
     # Read environment
     link = os.environ.get("MODEL_DOWNLOAD_LINK", "")
     target_folder = os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
-    speaker_str = os.environ.get("SPEAKER", "0")
-    sentence_silence = float(os.environ.get("SENTENCE_SILENCE", "0.0"))
+    speaker_str = os.environ.get("SPEAKER", "1")
+    sentence_silence = float(os.environ.get("SENTENCE_SILENCE", "0.5"))
     cuda_str = os.environ.get("CUDA", "true")
     length_scale = _env_float("LENGTH_SCALE")
     noise_scale = _env_float("NOISE_SCALE")
