@@ -218,6 +218,22 @@ def _switch_voice(
             _LOGGER.error("Download failed: %s", exc)
             return jsonify({"error": f"Download failed: {exc}"}), 500
 
+        # ── Cache: skip reload if same model + same params ──────────
+        requested_args: dict = {
+            k: v
+            for k, v in {
+                "speaker_id": speaker_id,
+                "length_scale": length_scale,
+                "noise_scale": noise_scale,
+                "noise_w": noise_w,
+                "sentence_silence": sentence_silence,
+            }.items()
+            if v is not None
+        }
+        if model_path == _model_path and requested_args == _synth_args:
+            _LOGGER.info("Model %s already loaded – skipping reload", model_path)
+            return jsonify({"status": "ok", "model": str(model_path), "cached": True}), 200
+
         try:
             load_voice(
                 model_path,
