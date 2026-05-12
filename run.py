@@ -68,6 +68,38 @@ def download_model(link: str, target_folder: str) -> str:
     return model_path
 
 
+# ── Well-known voice download URLs for Piper ─────────────────
+# If MODEL_DEFAULT is a short name (de_DE-thorsten-high), it gets
+# expanded to the full HuggingFace URL via this template.
+_PIPER_VOICE_URL_TPL = (
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+    "{language}/{locale}/{voice}/{quality}/{locale}-{voice}-{quality}.onnx?download=true"
+)
+
+
+def resolve_model_ref(ref: str) -> str:
+    """Return a download URL for *ref*.
+
+    * If *ref* starts with ``http`` → return unchanged.
+    * Otherwise treat as ``{locale}-{voice}-{quality}`` (e.g.
+      ``de_DE-thorsten-high``) and build the standard HuggingFace URL.
+    """
+    if ref.startswith("http"):
+        return ref
+
+    # expected format: locale-voice-quality  e.g.  de_DE-thorsten-high
+    parts = ref.rsplit("-", 2)
+    if len(parts) != 3:
+        _LOGGER.warning("Cannot parse model name %r – using as-is", ref)
+        return ref
+
+    locale, voice, quality = parts
+    language = locale.split("_")[0]
+    return _PIPER_VOICE_URL_TPL.format(
+        language=language, locale=locale, voice=voice, quality=quality
+    )
+
+
 def _unload_voice():
     """Unload the current voice and free GPU memory."""
     global _voice
@@ -138,7 +170,8 @@ def _render_html() -> str:
     current["model_path"] = _model_path
 
     env = _startup_env
-    default_model = env.get("MODEL_DEFAULT", "–")
+    default_ref = env.get("MODEL_DEFAULT", "")
+    default_url = resolve_model_ref(default_ref) if default_ref else "–"
     default_text = "Hallo Welt, das ist ein Test."  # placeholder fallback
 
     return f"""<!DOCTYPE html>
@@ -204,14 +237,15 @@ def _render_html() -> str:
 <h2>Stimme wechseln</h2>
 <pre>curl -X POST "{host_url}/voice" \\
   -H "Content-Type: application/json" \\
-  -d '{{"link": "{html_mod.escape(default_model)}", "sentence_silence": 1.5}}'</pre>
+  -d '{{"link": "{html_mod.escape(default_url)}", "sentence_silence": 1.5}}'</pre>
 
 <!-- ─── Current config ─── -->
 <h2>Aktuelle Konfiguration</h2>
 <pre id="config-display">Lade…</pre>
 
 <!-- ─── Default model ─── -->
-<p><strong>Default-Model:</strong> <code>{html_mod.escape(default_model)}</code></p>
+<p><strong>Default-Model:</strong> <code>{html_mod.escape(default_ref)}</code></p>
+<p><strong>→ URL:</strong> <code>{html_mod.escape(default_url)}</code></p>
 
 </div>
 
@@ -293,17 +327,20 @@ def handle_voice():
     GET  /voice         → current model path + synthesis config
     POST /voice         → switch to a new model
 
-    POST JSON payload:
+    POST JSON payload (all optional):
     {
-      "link": "https://...model.onnx?download=true",
-      "target_folder": "/app/models",           (optional)
-      "cuda": true,                              (optional)
-      "speaker_id": 0,                           (optional)
-      "length_scale": 1.2,                       (optional)
-      "noise_scale": 0.667,                      (optional)
-      "noise_w": 0.8,                            (optional)
-      "sentence_silence": 0.5                    (optional)
+      "link": "https://...model.onnx?download=true",   # wenn leer → MODEL_DEFAULT
+      "target_folder": "/app/models",
+      "cuda": true,
+      "speaker_id": 0,
+      "length_scale": 1.2,
+      "noise_scale": 0.667,
+      "noise_w": 0.8,
+      "sentence_silence": 0.5
     }
+
+    If *link* is omitted (or the body is empty), the server loads
+    the voice defined by the ``MODEL_DEFAULT`` env var.
     """
     if request.method == "GET":
         return jsonify({
@@ -316,9 +353,15 @@ def handle_voice():
     if not data:
         data = request.form.to_dict()
 
-    link = data.get("link") or data.get("model_path")
+    link = (data.get("link") or data.get("model_path") or "").strip()
+
+    # Fallback to MODEL_DEFAULT when no link was provided
     if not link:
-        return jsonify({"error": "Missing 'link' (model download URL)"}), 400
+        default_ref = os.environ.get("MODEL_DEFAULT", "")
+        if not default_ref:
+            return jsonify({"error": "Missing 'link'. Set MODEL_DEFAULT env var or pass a link."}), 400
+        link = resolve_model_ref(default_ref)
+        _LOGGER.info("No link provided – falling back to MODEL_DEFAULT: %s", link)
 
     target_folder = data.get("target_folder", "/app/models")
 
@@ -366,6 +409,10 @@ def main():
     for key in ("SPEAKER", "SENTENCE_SILENCE", "LENGTH_SCALE", "NOISE_SCALE", "NOISE_W", "CUDA"):
         if key in os.environ:
             _startup_env[key] = os.environ[key]
+
+    # Resolve MODEL_DEFAULT name → URL for later use
+    model_default_name = os.environ.get("MODEL_DEFAULT", "")
+    model_default_url = resolve_model_ref(model_default_name) if model_default_name else ""
 
     # Read environment
     link = os.environ.get("MODEL_DOWNLOAD_LINK", "")
