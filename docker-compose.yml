@@ -6,8 +6,5 @@ services:
       - "5000:5000"
     env_file: piper.env
     volumes:
-      - piper-models:/app/models
+      - /appdata/models:/app/models
     restart: unless-stopped
-
-volumes:
-  piper-models:
