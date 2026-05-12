@@ -1,13 +1,20 @@
 services:
   piper:
-    image: artibex/piper-http:latest
+    build: .
     container_name: piper
     ports:
       - "5000:5000"
     environment:
-      MODEL_DOWNLOAD_LINK: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/pavoque/low/de_DE-pavoque-low.onnx?download=true"
+      # ── Initial model ─────────────────────────────────────────────
+      MODEL_DOWNLOAD_LINK: "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/jarvis/high/de_DE-jarvis-high.onnx?download=true"
       MODEL_TARGET_FOLDER: "/app/models"
       SPEAKER: "0"
+      # ── TTS parameters ───────────────────────────────────────────
+      SENTENCE_SILENCE: "1.5"      # ← 1.5 Sekunden Pause zwischen Sätzen
+      LENGTH_SCALE: "1.1"
+      NOISE_SCALE: "0.667"
+      NOISE_W: "0.8"
+      CUDA: "true"
     volumes:
       - piper-models:/app/models
     restart: unless-stopped
