@@ -427,6 +427,9 @@ def handle_synthesize():
     GET  /              → HTML guide page (browser)
     GET  /?text=Hallo   → WAV download
     POST /              → text in body → WAV download
+
+    Optional query params (override current voice config per request):
+      ?speaker_id=0&length_scale=1.1&noise_scale=0.667&noise_w=0.8&sentence_silence=0.5
     """
     if _voice is None:
         return "No voice model loaded", 503
@@ -448,11 +451,20 @@ def handle_synthesize():
             return _render_html()
         return "No text provided", 400
 
-    _LOGGER.debug("Synthesising: %s", text)
+    # ── Merge per-request override params ──
+    overrides = {}
+    for key in ("speaker_id", "length_scale", "noise_scale", "noise_w", "sentence_silence"):
+        val = _arg_float(request.args.get(key))
+        if val is not None:
+            overrides[key] = int(val) if key == "speaker_id" else val
+
+    synth_kwargs = {**_synth_args, **overrides}
+
+    _LOGGER.debug("Synthesising: %s  overrides=%s -> %s", text[:50], overrides, synth_kwargs)
     try:
         with io.BytesIO() as wav_io:
             with wave.open(wav_io, "wb") as wav_file:
-                _voice.synthesize(text, wav_file, **_synth_args)
+                _voice.synthesize(text, wav_file, **synth_kwargs)
             wav_data = wav_io.getvalue()
 
         return Response(
