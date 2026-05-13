@@ -204,7 +204,7 @@ def _switch_voice(
     length_scale: float | None = None,
     noise_scale: float | None = None,
     noise_w: float | None = None,
-    sentence_silence: float | None = 0.0,
+    sentence_silence: float | None = None,
 ) -> tuple[Response, int]:
     """Download & load a new Piper voice.  Returns a JSON response tuple."""
     with _model_lock:
@@ -553,21 +553,21 @@ def handle_synthesize():
             return _render_html()
         return "No text provided", 400
 
-    # ── Per-request model switch (optional) ──
-    model_param = request.args.get("model", "").strip()
-    if model_param:
-        _LOGGER.info("Per-request model switch to %s", model_param)
-        result, code = _switch_voice(link=model_param)
-        if code != 200:
-            _LOGGER.warning("Model switch failed: %s", result.get_data(as_text=True))
-            return result, code
-
     # ── Merge per-request override params ──
     overrides = {}
     for key in ("speaker_id", "length_scale", "noise_scale", "noise_w", "sentence_silence"):
         val = _arg_float(request.args.get(key))
         if val is not None:
             overrides[key] = int(val) if key == "speaker_id" else val
+
+    # ── Per-request model switch (optional) ──
+    model_param = request.args.get("model", "").strip()
+    if model_param:
+        _LOGGER.info("Per-request model switch to %s with overrides=%s", model_param, overrides)
+        result, code = _switch_voice(link=model_param, **overrides)
+        if code != 200:
+            _LOGGER.warning("Model switch failed: %s", result.get_data(as_text=True))
+            return result, code
 
     synth_kwargs = {**_synth_args, **overrides}
 
