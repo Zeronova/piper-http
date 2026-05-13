@@ -553,6 +553,15 @@ def handle_synthesize():
             return _render_html()
         return "No text provided", 400
 
+    # ── Per-request model switch (optional) ──
+    model_param = request.args.get("model", "").strip()
+    if model_param:
+        _LOGGER.info("Per-request model switch to %s", model_param)
+        result, code = _switch_voice(link=model_param)
+        if code != 200:
+            _LOGGER.warning("Model switch failed: %s", result.get_data(as_text=True))
+            return result, code
+
     # ── Merge per-request override params ──
     overrides = {}
     for key in ("speaker_id", "length_scale", "noise_scale", "noise_w", "sentence_silence"):
