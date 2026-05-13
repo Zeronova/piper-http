@@ -25,6 +25,8 @@ Env vars:
   OUTPUT_FORMAT         - optional: "ogg" to convert via ffmpeg, empty/"wav" to skip (default: none)
   OUTPUT_QUALITY        - ffmpeg audio quality (-q:a), used when OUTPUT_FORMAT is set (default: 5)
   OUTPUT_SAMPLE_RATE    - ffmpeg sample rate (-ar), used when OUTPUT_FORMAT is set (default: 22050)
+  OUTPUT_PAD_START      - seconds of silence before audio (default: 0)
+  OUTPUT_PAD_END        - seconds of silence after audio (default: 0)
 """
 
 import subprocess
@@ -570,6 +572,12 @@ def handle_synthesize():
     # Per-request override via ?format=
     output_format = request.args.get("format", output_format).strip().lower()
 
+    # ── Padding config ────────────────────────────────────────────
+    pad_start = float(request.args.get("pad_start",
+        os.environ.get("OUTPUT_PAD_START", "0")))
+    pad_end = float(request.args.get("pad_end",
+        os.environ.get("OUTPUT_PAD_END", "0")))
+
     try:
         with io.BytesIO() as wav_io:
             with wave.open(wav_io, "wb") as wav_file:
@@ -582,17 +590,29 @@ def handle_synthesize():
             ext = output_format
             mimetype = mime_map.get(output_format, "audio/" + output_format)
 
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-i", "pipe:0",
+            ]
+            # ── Silence padding via audio filter ──────────────
+            if pad_start > 0 or pad_end > 0:
+                filters = []
+                if pad_start > 0:
+                    filters.append(f"adelay={int(pad_start * 1000)}")
+                if pad_end > 0:
+                    filters.append(f"apad=pad_dur={pad_end}")
+                ffmpeg_cmd += ["-af", ",".join(filters)]
+            ffmpeg_cmd += [
+                "-codec:a", "libvorbis" if output_format == "ogg" else "copy",
+                "-q:a", output_quality,
+                "-ar", output_sample_rate,
+                "-f", output_format,
+                "pipe:1",
+                "-y",
+            ]
+
             proc = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-i", "pipe:0",
-                    "-codec:a", "libvorbis" if output_format == "ogg" else "copy",
-                    "-q:a", output_quality,
-                    "-ar", output_sample_rate,
-                    "-f", output_format,
-                    "pipe:1",
-                    "-y",
-                ],
+                ffmpeg_cmd,
                 input=wav_data,
                 capture_output=True,
                 check=True,
@@ -749,7 +769,7 @@ def main():
     _startup_env = {k: v for k, v in os.environ.items() if k.startswith("MODEL_")}
     # Also snapshot the synthesis env vars
     for key in ("SPEAKER", "SENTENCE_SILENCE", "LENGTH_SCALE", "NOISE_SCALE", "NOISE_W", "CUDA",
-                "OUTPUT_FORMAT", "OUTPUT_QUALITY", "OUTPUT_SAMPLE_RATE"):
+                "OUTPUT_FORMAT", "OUTPUT_QUALITY", "OUTPUT_SAMPLE_RATE", "OUTPUT_PAD_START", "OUTPUT_PAD_END"):
         if key in os.environ:
             _startup_env[key] = os.environ[key]
 
