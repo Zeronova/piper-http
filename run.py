@@ -22,6 +22,9 @@ Env vars:
   LENGTH_SCALE          - phoneme length (default: 1.0)
   NOISE_SCALE           - generator noise (default: none = Piper default)
   NOISE_W               - phoneme width noise (default: none = Piper default)
+  OUTPUT_FORMAT         - optional: "ogg" to convert via ffmpeg, empty/"wav" to skip (default: none)
+  OUTPUT_QUALITY        - ffmpeg audio quality (-q:a), used when OUTPUT_FORMAT is set (default: 5)
+  OUTPUT_SAMPLE_RATE    - ffmpeg sample rate (-ar), used when OUTPUT_FORMAT is set (default: 22050)
 """
 
 import subprocess
@@ -397,6 +400,12 @@ def _render_html() -> str:
              style="width:100%;padding:8px;border:1px solid #333;border-radius:6px;
                     background:#0f3460;color:#e0e0e0;font-size:13px;">
     </div>
+    <div style="flex:1;">
+      <label for="format" style="font-size:13px;">format</label>
+      <input type="text" name="format" id="format" value="ogg"
+             style="width:100%;padding:8px;border:1px solid #333;border-radius:6px;
+                    background:#0f3460;color:#e0e0e0;font-size:13px;">
+    </div>
   </div>
 
   <div id="synth-status" class="loading" style="margin-top:8px;"></div>
@@ -431,13 +440,15 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
     var ls = document.getElementById('length-scale').value.trim();
     var ss = document.getElementById('sentence-silence').value.trim();
     var sid = document.getElementById('speaker-id').value.trim();
+    var fmt = document.getElementById('format').value.trim();
     if (ls) params.set('length_scale', ls);
     if (ss) params.set('sentence_silence', ss);
     if (sid) params.set('speaker_id', sid);
+    if (fmt) params.set('format', fmt);
     // Download auslösen ohne die Seite zu verlassen
     var a = document.createElement('a');
     a.href = '{host_url}/?' + params.toString();
-    a.download = 'piper-tts.wav';
+    a.download = 'piper-tts.' + (fmt || 'wav');
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -550,18 +561,54 @@ def handle_synthesize():
     synth_kwargs = {**_synth_args, **overrides}
 
     _LOGGER.debug("Synthesising: %s  overrides=%s -> %s", text[:50], overrides, synth_kwargs)
+
+    # ── Output format config ──────────────────────────────────────
+    output_format = os.environ.get("OUTPUT_FORMAT", "").strip().lower()
+    output_quality = os.environ.get("OUTPUT_QUALITY", "5")
+    output_sample_rate = os.environ.get("OUTPUT_SAMPLE_RATE", "22050")
+
+    # Per-request override via ?format=
+    output_format = request.args.get("format", output_format).strip().lower()
+
     try:
         with io.BytesIO() as wav_io:
             with wave.open(wav_io, "wb") as wav_file:
                 _voice.synthesize(text, wav_file, **synth_kwargs)
             wav_data = wav_io.getvalue()
 
+        # ── Optional ffmpeg conversion ─────────────────────────
+        if output_format and output_format != "wav":
+            mime_map = {"ogg": "audio/ogg"}
+            ext = output_format
+            mimetype = mime_map.get(output_format, "audio/" + output_format)
+
+            proc = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-i", "pipe:0",
+                    "-codec:a", "libvorbis" if output_format == "ogg" else "copy",
+                    "-q:a", output_quality,
+                    "-ar", output_sample_rate,
+                    "-f", output_format,
+                    "pipe:1",
+                    "-y",
+                ],
+                input=wav_data,
+                capture_output=True,
+                check=True,
+            )
+            audio_data = proc.stdout
+        else:
+            ext = "wav"
+            mimetype = "audio/wav"
+            audio_data = wav_data
+
         return Response(
-            wav_data,
-            mimetype="audio/wav",
+            audio_data,
+            mimetype=mimetype,
             headers={
-                "Content-Disposition": 'attachment; filename="piper-tts.wav"',
-                "Content-Length": str(len(wav_data)),
+                "Content-Disposition": f'attachment; filename="piper-tts.{ext}"',
+                "Content-Length": str(len(audio_data)),
             },
         )
     except Exception as exc:
@@ -701,7 +748,8 @@ def main():
     global _startup_env
     _startup_env = {k: v for k, v in os.environ.items() if k.startswith("MODEL_")}
     # Also snapshot the synthesis env vars
-    for key in ("SPEAKER", "SENTENCE_SILENCE", "LENGTH_SCALE", "NOISE_SCALE", "NOISE_W", "CUDA"):
+    for key in ("SPEAKER", "SENTENCE_SILENCE", "LENGTH_SCALE", "NOISE_SCALE", "NOISE_W", "CUDA",
+                "OUTPUT_FORMAT", "OUTPUT_QUALITY", "OUTPUT_SAMPLE_RATE"):
         if key in os.environ:
             _startup_env[key] = os.environ[key]
 
