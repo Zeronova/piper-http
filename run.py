@@ -487,7 +487,10 @@ POST /?length_scale=1.0&amp;format=ogg                   → Mit Parametern</pre
 <tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
 <tr><td style="padding:4px 8px;"><code>sentence_silence</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Pause zwischen Sätzen in Sekunden (Default: 0.5)</td></tr>
 <tr><td style="padding:4px 8px;"><code>format</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Ausgabeformat: <code>wav</code> (Default) oder <code>ogg</code></td></tr>
+<tr><td style="padding:4px 8px;"><code>pad_start</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sekunden Stille vor dem Audio (ffmpeg, Default: 0)</td></tr>
+<tr><td style="padding:4px 8px;"><code>pad_end</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sekunden Stille nach dem Audio (ffmpeg, Default: 0)</td></tr>
 </table>
+<p style="color:#888;font-size:13px;">💡 Die ffmpeg-Output-Parameter <code>pad_start</code>, <code>pad_end</code>, <code>format</code> sowie die Synthese-Parameter sind pro Request übersteuerbar. Basis-Qualität und Sample-Rate kommen aus den Environment-Variablen <code>OUTPUT_QUALITY</code> und <code>OUTPUT_SAMPLE_RATE</code>.</p>
 
 <h3 style="color:#a8d8ea;">Stimme wechseln</h3>
 <pre>POST /voice
