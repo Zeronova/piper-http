@@ -57,6 +57,9 @@ _model_path: str | None = None
 _synth_args: dict = {}
 _startup_env: dict = {}  # snapshot of env vars for the web UI
 
+# Denglisch word replacements (geladen aus denglisch.json im Model-Verzeichnis)
+_denglisch_map: dict[str, str] | None = None
+
 
 def download_model(link: str, target_folder: str) -> str:
     """Download model (.onnx + .json) from huggingface if not already cached.
@@ -413,6 +416,13 @@ def _render_html() -> str:
   <div id="synth-status" class="loading" style="margin-top:8px;"></div>
   <button type="submit">🔊 Stimme wechseln &amp; synthetisieren</button>
 </form>
+
+<audio id="audio-player" controls
+       style="width:100%;margin-top:12px;display:none;
+              background:#0f3460;border-radius:8px;">
+  Dein Browser unterstützt keinen Audio-Player.
+</audio>
+
 <script>
 document.getElementById('synth-form').addEventListener('submit', function(e) {{
   e.preventDefault();
@@ -447,14 +457,15 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
     if (ss) params.set('sentence_silence', ss);
     if (sid) params.set('speaker_id', sid);
     if (fmt) params.set('format', fmt);
-    // Download auslösen ohne die Seite zu verlassen
-    var a = document.createElement('a');
-    a.href = '{host_url}/?' + params.toString();
-    a.download = 'piper-tts.' + (fmt || 'wav');
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    status.textContent = '✅ Synthese fertig – Datei wird heruntergeladen';
+    // Audio im Browser abspielen statt Download
+    var audio = document.getElementById('audio-player');
+    audio.src = '{host_url}/?' + params.toString();
+    audio.style.display = 'block';
+    audio.play().catch(function(e) {{
+      // Autoplay erlaubt der Browser nicht immer — Player bleibt sichtbar
+      console.log('Autoplay verweigert, Player ist bereit:', e.message);
+    }});
+    status.textContent = '✅ Audio bereit – Player unten';
     button.disabled = false;
   }})
   .catch(function(e) {{
@@ -506,6 +517,7 @@ GET  /health   → Status + Version + CUDA (JSON)</pre>
 <tr><td style="padding:4px 8px;"><code>length_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sprechgeschwindigkeit (1.0 = normal)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
+<tr><td style="padding:4px 8px;"><code>denglisch</code></td><td style="padding:4px 8px;">bool</td><td style="padding:4px 8px;">Wort-Ersetzungen aus <code>denglisch.json</code> anwenden (<code>true</code>/<code>false</code>)</td></tr>
 </table>
 
 <h3 style="color:#a8d8ea;">Output-Format</h3>
@@ -548,6 +560,45 @@ fetch('{host_url}/voice')
 
 
 # ---------------------------------------------------------------------------
+# Denglisch word replacements
+# ---------------------------------------------------------------------------
+
+def _load_denglisch() -> dict[str, str]:
+    """Load denglisch.json from the model folder."""
+    global _denglisch_map
+    if _denglisch_map is not None:
+        return _denglisch_map
+    folder = os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
+    path = os.path.join(folder, "denglisch.json")
+    if not os.path.exists(path):
+        _LOGGER.info("No denglisch.json found in %s — Denglisch deaktiviert", folder)
+        _denglisch_map = {}
+        return _denglisch_map
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            _denglisch_map = json.load(f)
+        _LOGGER.info("Denglisch geladen: %d Einträge aus %s", len(_denglisch_map), path)
+    except Exception as exc:
+        _LOGGER.warning("Fehler beim Laden von denglisch.json: %s", exc)
+        _denglisch_map = {}
+    return _denglisch_map
+
+
+def _apply_denglisch(text: str, dmap: dict[str, str]) -> str:
+    """Apply denglisch word replacements to *text*.
+
+    Ersetzt jedes Wort aus *dmap* (case-insensitive, ganzwörtlich) im Text.
+    """
+    if not dmap:
+        return text
+    import re
+    # Längere Einträge zuerst, damit z.B. "Backup-Server" vor "Backup" matcht
+    for orig, repl in sorted(dmap.items(), key=lambda x: -len(x[0])):
+        text = re.sub(r'\b' + re.escape(orig) + r'\b', repl, text, flags=re.IGNORECASE)
+    return text
+
+
+# ---------------------------------------------------------------------------
 # Flask app
 # ---------------------------------------------------------------------------
 
@@ -583,6 +634,14 @@ def handle_synthesize():
         if request.method == "POST":
             return _render_html()
         return "No text provided", 400
+
+    # ── Denglisch word replacements ──
+    denglisch_param = request.args.get("denglisch", "").strip().lower()
+    if denglisch_param in ("true", "1", "yes"):
+        dmap = _load_denglisch()
+        if dmap:
+            text = _apply_denglisch(text, dmap)
+            _LOGGER.debug("Denglisch applied → %s", text[:80])
 
     # ── Merge per-request override params ──
     overrides = {}
