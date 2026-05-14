@@ -486,11 +486,10 @@ POST /?length_scale=1.0&amp;format=ogg                   → Mit Parametern</pre
 <tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard = keiner)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
 <tr><td style="padding:4px 8px;"><code>sentence_silence</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Pause zwischen Sätzen in Sekunden (Default: 0.5)</td></tr>
-<tr><td style="padding:4px 8px;"><code>format</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Ausgabeformat: <code>wav</code> (Default) oder <code>ogg</code></td></tr>
-<tr><td style="padding:4px 8px;"><code>pad_start</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sekunden Stille vor dem Audio (ffmpeg, Default: 0)</td></tr>
-<tr><td style="padding:4px 8px;"><code>pad_end</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sekunden Stille nach dem Audio (ffmpeg, Default: 0)</td></tr>
+<tr><td style="padding:4px 8px;"><code>format</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Ausgabeformat: <code>wav</code>, <code>ogg</code>, <code>mp3</code>, <code>opus</code>, <code>flac</code>, <code>aac</code> …</td></tr>
+<tr><td style="padding:4px 8px;"><code>sample_rate</code></td><td style="padding:4px 8px;">int</td><td style="padding:4px 8px;">Ziel-Samplerate in Hz (Default: native Model-Rate)</td></tr>
+<tr><td style="padding:4px 8px;"><code>upsample</code></td><td style="padding:4px 8px;">bool</td><td style="padding:4px 8px;">Auf mind. 22kHz hochsamplen (<code>true</code>/<code>false</code>)</td></tr>
 </table>
-<p style="color:#888;font-size:13px;">💡 Die ffmpeg-Output-Parameter <code>pad_start</code>, <code>pad_end</code>, <code>format</code> sowie die Synthese-Parameter sind pro Request übersteuerbar. Basis-Qualität und Sample-Rate kommen aus den Environment-Variablen <code>OUTPUT_QUALITY</code> und <code>OUTPUT_SAMPLE_RATE</code>.</p>
 
 <h3 style="color:#a8d8ea;">Stimme wechseln</h3>
 <pre>POST /voice
@@ -519,11 +518,17 @@ Content-Type: application/json
 <pre>GET  /health  → {"status": "ok", "version": "…", "cuda": true/false}</pre>
 
 <h3 style="color:#a8d8ea;">Kurz-Referenz (curl)</h3>
-<pre># Standard
+<pre># WAV (Standard)
 curl -o output.wav "{host_url}/?text=Hallo+Welt"
 
-# Mit Parametern + OGG
+# OGG mit Parametern
 curl -o output.ogg "{host_url}/?text=Hallo&amp;length_scale=1.2&amp;sentence_silence=0.3&amp;format=ogg"
+
+# MP3
+curl -o output.mp3 "{host_url}/?text=Hallo+Welt&amp;format=mp3"
+
+# Opus
+curl -o output.opus "{host_url}/?text=Hallo+Welt&amp;format=opus"
 
 # POST (Text im Body)
 curl -X POST "{host_url}/" -d "Hallo Welt" -o output.wav
@@ -540,18 +545,6 @@ curl -X POST "{host_url}/voice" \
 <!-- ─── Default model ─── -->
 <p><strong>Default-Model:</strong> <code>{html_mod.escape(default_ref)}</code></p>
 <p><strong>→ URL:</strong> <code>{html_mod.escape(default_url)}</code></p>
-
-<!-- ─── Verfuegbare Modelle ─── -->
-<h2>Verfügbare Modelle</h2>
-<p><code><a href="{host_url}/models">GET /models</a></code> – API-Liste aller Modelle</p>
-<table style="width:100%; border-collapse: collapse;">
-<tr style="border-bottom:1px solid #333; text-align:left;">
-  <th style="padding:4px 8px;">Datei</th>
-  <th style="padding:4px 8px;">Grösse</th>
-  <th style="padding:4px 8px;">Aktiv</th>
-</tr>
-{_render_models_table_rows(target_folder=os.environ.get("MODEL_TARGET_FOLDER", "/app/models"))}
-</table>
 
 </div>
 
@@ -632,7 +625,6 @@ def handle_synthesize():
     # ── Output format config ──────────────────────────────────────
     output_format = os.environ.get("OUTPUT_FORMAT", "").strip().lower()
     output_quality = os.environ.get("OUTPUT_QUALITY", "5")
-    output_sample_rate = os.environ.get("OUTPUT_SAMPLE_RATE", "22050")
 
     # Per-request override via ?format=
     output_format = request.args.get("format", output_format).strip().lower()
@@ -649,11 +641,40 @@ def handle_synthesize():
                 _voice.synthesize(text, wav_file, **synth_kwargs)
             wav_data = wav_io.getvalue()
 
+        # ── Determine target sample rate ──────────────────────────
+        with io.BytesIO(wav_data) as r:
+            with wave.open(r, "rb") as wf:
+                native_rate = wf.getframerate()
+
+        sr_param = request.args.get("sample_rate", "").strip()
+        upsample_param = request.args.get("upsample", "").strip().lower() in ("true", "1", "yes")
+        if sr_param:
+            output_sample_rate = int(sr_param)
+        elif upsample_param:
+            output_sample_rate = max(native_rate, 22050)
+        else:
+            output_sample_rate = int(os.environ.get("OUTPUT_SAMPLE_RATE", str(native_rate)))
+
         # ── Optional ffmpeg conversion ─────────────────────────
         if output_format and output_format != "wav":
-            mime_map = {"ogg": "audio/ogg"}
+            CODEC_MAP = {
+                "ogg": "libvorbis",
+                "opus": "libopus",
+                "mp3": "libmp3lame",
+                "mpeg": "libmp3lame",
+                "aac": "aac",
+                "flac": "flac",
+            }
+            MIME_MAP = {
+                "ogg": "audio/ogg",
+                "opus": "audio/opus",
+                "mp3": "audio/mpeg",
+                "aac": "audio/aac",
+                "flac": "audio/flac",
+                "wav": "audio/wav",
+            }
             ext = output_format
-            mimetype = mime_map.get(output_format, "audio/" + output_format)
+            mimetype = MIME_MAP.get(output_format, "audio/" + output_format)
 
             ffmpeg_cmd = [
                 "ffmpeg",
@@ -668,9 +689,9 @@ def handle_synthesize():
                     filters.append(f"apad=pad_dur={pad_end}")
                 ffmpeg_cmd += ["-af", ",".join(filters)]
             ffmpeg_cmd += [
-                "-codec:a", "libvorbis" if output_format == "ogg" else "copy",
+                "-codec:a", CODEC_MAP.get(output_format, "copy"),
                 "-q:a", output_quality,
-                "-ar", output_sample_rate,
+                "-ar", str(output_sample_rate),
                 "-f", output_format,
                 "pipe:1",
                 "-y",
