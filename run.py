@@ -468,28 +468,57 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
 <h2>API für Bots &amp; Automation</h2>
 <p style="color:#888;">Alle Endpunkte, die ein anderer Agent (oder curl) braucht:</p>
 
-<h3 style="color:#a8d8ea;">TTS synthetisieren</h3>
-<pre>GET  /?text=Hallo+Welt                              → WAV/OGG
-POST /                                               → Raw body = text
+<h3 style="color:#a8d8ea;">Grundaufbau</h3>
+<pre>GET  /?text=Hallo+Welt                              → Audio-Download
+POST /                                               → Text im Body = Audio-Download
 POST /?length_scale=1.0&amp;format=ogg                   → Mit Parametern</pre>
+<p>Sämtliche Synthese- und Output-Parameter werden als Query-Parameter an <code>GET /</code> oder <code>POST /</code> angehängt.</p>
 
+<h3 style="color:#a8d8ea;">Model Management</h3>
+<pre>GET  /voice    → Aktuelles Modell + Konfiguration (JSON)
+POST /voice    → Stimme wechseln (JSON Body, siehe curl)
+GET  /models   → Verfügbare Modelle (JSON)
+GET  /health   → Status + Version + CUDA (JSON)</pre>
+<p><code>POST /voice</code> Body:</p>
+<pre>{{
+  "link": "de_DE-thorsten-high",
+  "sentence_silence": 1.5,
+  "speaker_id": 0,
+  "length_scale": 1.1
+}}</pre>
+<p>
+  <code>link</code> akzeptiert:<br>
+  • HuggingFace-URL (z.B. <code>https://huggingface.co/rhasspy/piper-voices/…/de_DE-thorsten-high.onnx</code>)<br>
+  • Dateiname (aus <code>GET /models</code>)<br>
+  • Kurzname (z.B. <code>de_DE-thorsten-high</code>)
+</p>
+<p>Auch <code>?model=</code> im TTS-Request wechselt per-Request die Stimme, ohne den globalen Zustand zu ändern.</p>
+
+<h3 style="color:#a8d8ea;">Synthese-Parameter</h3>
 <table style="width:100%;border-collapse:collapse;margin-bottom:1em;">
 <tr style="border-bottom:1px solid #333;text-align:left;">
   <th style="padding:4px 8px;">Parameter</th>
   <th style="padding:4px 8px;">Typ</th>
   <th style="padding:4px 8px;">Beschreibung</th>
 </tr>
-<tr><td style="padding:4px 8px;"><code>text</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Zu sprechender Text (GET) oder Raw Body (POST)</td></tr>
-<tr><td style="padding:4px 8px;"><code>model</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Modell-Pfad/URL (siehe <a href="{host_url}/models">GET /models</a>)</td></tr>
-<tr><td style="padding:4px 8px;"><code>speaker_id</code></td><td style="padding:4px 8px;">int</td><td style="padding:4px 8px;">Sprecher-ID (z.B. 0 oder 1)</td></tr>
-<tr><td style="padding:4px 8px;"><code>length_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sprechgeschwindigkeit (1.0 = normal)</td></tr>
-<tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard = keiner)</td></tr>
-<tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
+<tr><td style="padding:4px 8px;"><code>speaker_id</code></td><td style="padding:4px 8px;">int</td><td style="padding:4px 8px;">Sprecher-ID (0 oder 1, je nach Modell)</td></tr>
 <tr><td style="padding:4px 8px;"><code>sentence_silence</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Pause zwischen Sätzen in Sekunden (Default: 0.5)</td></tr>
-<tr><td style="padding:4px 8px;"><code>format</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Ausgabeformat: <code>wav</code>, <code>ogg</code>, <code>mp3</code>, <code>opus</code>, <code>flac</code>, <code>aac</code> …</td></tr>
-<tr><td style="padding:4px 8px;"><code>sample_rate</code></td><td style="padding:4px 8px;">int</td><td style="padding:4px 8px;">Ziel-Samplerate in Hz (Default: native Model-Rate)</td></tr>
+<tr><td style="padding:4px 8px;"><code>length_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sprechgeschwindigkeit (1.0 = normal)</td></tr>
+<tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard)</td></tr>
+<tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
+</table>
+
+<h3 style="color:#a8d8ea;">Output-Format</h3>
+<table style="width:100%;border-collapse:collapse;margin-bottom:1em;">
+<tr style="border-bottom:1px solid #333;text-align:left;">
+  <th style="padding:4px 8px;">Parameter</th>
+  <th style="padding:4px 8px;">Typ</th>
+  <th style="padding:4px 8px;">Beschreibung</th>
+</tr>
+<tr><td style="padding:4px 8px;"><code>format</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Ausgabeformat: <code>wav</code> (Default), <code>ogg</code>, <code>mp3</code>, <code>opus</code>, <code>flac</code>, <code>aac</code></td></tr>
 <tr><td style="padding:4px 8px;"><code>upsample</code></td><td style="padding:4px 8px;">bool</td><td style="padding:4px 8px;">Auf mind. 22kHz hochsamplen (<code>true</code>/<code>false</code>)</td></tr>
 </table>
+<p style="color:#888;font-size:13px;">Die Samplerate wird vom Piper-Modell vorgegeben. <code>upsample=true</code> skaliert auf ≥22kHz hoch.</p>
 
 <h3 style="color:#a8d8ea;">Stimme wechseln</h3>
 <pre>POST /voice
