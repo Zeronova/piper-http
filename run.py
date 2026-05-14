@@ -413,6 +413,19 @@ def _render_html() -> str:
     </div>
   </div>
 
+  <div style="display:flex;gap:24px;margin-top:12px;align-items:center;">
+    <label style="font-size:14px;cursor:pointer;display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" name="denglisch" id="denglisch"
+             style="width:18px;height:18px;accent-color:#00d4aa;">
+      Denglisch
+    </label>
+    <label style="font-size:14px;cursor:pointer;display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" name="upsample" id="upsample"
+             style="width:18px;height:18px;accent-color:#00d4aa;">
+      Upsample
+    </label>
+  </div>
+
   <div id="synth-status" class="loading" style="margin-top:8px;"></div>
   <button type="submit">🔊 Stimme wechseln &amp; synthetisieren</button>
 </form>
@@ -457,6 +470,9 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
     if (ss) params.set('sentence_silence', ss);
     if (sid) params.set('speaker_id', sid);
     if (fmt) params.set('format', fmt);
+    // Checkboxen
+    if (document.getElementById('denglisch').checked) params.set('denglisch', 'true');
+    if (document.getElementById('upsample').checked) params.set('upsample', 'true');
     // Audio im Browser abspielen statt Download
     var audio = document.getElementById('audio-player');
     audio.src = '{host_url}/?' + params.toString();
