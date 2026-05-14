@@ -464,16 +464,69 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
 }});
 </script>
 
-<!-- ─── curl / POST usage ─── -->
-<h2>curl</h2>
-<pre>curl -o output.wav "{host_url}/?text=Hallo+Welt"</pre>
-<pre>curl -o output.wav "{host_url}/?text=Hallo+Welt&amp;length_scale=1.2&amp;sentence_silence=0.3"</pre>
+<!-- ─── Bot / Agent API Guide ─── -->
+<h2>API für Bots &amp; Automation</h2>
+<p style="color:#888;">Alle Endpunkte, die ein anderer Agent (oder curl) braucht:</p>
 
-<h2>POST (raw body)</h2>
-<pre>curl -X POST "{host_url}/?length_scale=1.0" -d "Hallo Welt" -o output.wav</pre>
+<h3 style="color:#a8d8ea;">TTS synthetisieren</h3>
+<pre>GET  /?text=Hallo+Welt                              → WAV/OGG
+POST /                                               → Raw body = text
+POST /?length_scale=1.0&amp;format=ogg                   → Mit Parametern</pre>
 
-<h2>Stimme wechseln (API)</h2>
-<pre>curl -X POST "{host_url}/voice" \
+<table style="width:100%;border-collapse:collapse;margin-bottom:1em;">
+<tr style="border-bottom:1px solid #333;text-align:left;">
+  <th style="padding:4px 8px;">Parameter</th>
+  <th style="padding:4px 8px;">Typ</th>
+  <th style="padding:4px 8px;">Beschreibung</th>
+</tr>
+<tr><td style="padding:4px 8px;"><code>text</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Zu sprechender Text (GET) oder Raw Body (POST)</td></tr>
+<tr><td style="padding:4px 8px;"><code>model</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Modell-Pfad/URL (siehe <a href="{host_url}/models">GET /models</a>)</td></tr>
+<tr><td style="padding:4px 8px;"><code>speaker_id</code></td><td style="padding:4px 8px;">int</td><td style="padding:4px 8px;">Sprecher-ID (z.B. 0 oder 1)</td></tr>
+<tr><td style="padding:4px 8px;"><code>length_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sprechgeschwindigkeit (1.0 = normal)</td></tr>
+<tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard = keiner)</td></tr>
+<tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
+<tr><td style="padding:4px 8px;"><code>sentence_silence</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Pause zwischen Sätzen in Sekunden (Default: 0.5)</td></tr>
+<tr><td style="padding:4px 8px;"><code>format</code></td><td style="padding:4px 8px;">string</td><td style="padding:4px 8px;">Ausgabeformat: <code>wav</code> (Default) oder <code>ogg</code></td></tr>
+</table>
+
+<h3 style="color:#a8d8ea;">Stimme wechseln</h3>
+<pre>POST /voice
+Content-Type: application/json
+
+{{
+  "link": "de_DE-thorsten-high",
+  "sentence_silence": 1.5,
+  "speaker_id": 0,
+  "length_scale": 1.1
+}}</pre>
+<p>
+  <code>link</code> kann sein:<br>
+  • HuggingFace-URL (z.B. <code>https://huggingface.co/rhasspy/piper-voices/.../de_DE-thorsten-high.onnx</code>)<br>
+  • Dateiname aus der lokalen Liste (siehe <a href="{host_url}/models">GET /models</a>)<br>
+  • Kurzname (z.B. <code>de_DE-thorsten-high</code>)
+</p>
+
+<h3 style="color:#a8d8ea;">Aktuelle Konfiguration abfragen</h3>
+<pre>GET  /voice   → JSON mit aktuellem Modell, Parametern, Cache-Status</pre>
+
+<h3 style="color:#a8d8ea;">Verfügbare Modelle auflisten</h3>
+<pre>GET  /models  → JSON mit lokalen Dateien + bekannten Piper-Voices</pre>
+
+<h3 style="color:#a8d8ea;">Health-Check</h3>
+<pre>GET  /health  → {"status": "ok", "version": "…", "cuda": true/false}</pre>
+
+<h3 style="color:#a8d8ea;">Kurz-Referenz (curl)</h3>
+<pre># Standard
+curl -o output.wav "{host_url}/?text=Hallo+Welt"
+
+# Mit Parametern + OGG
+curl -o output.ogg "{host_url}/?text=Hallo&amp;length_scale=1.2&amp;sentence_silence=0.3&amp;format=ogg"
+
+# POST (Text im Body)
+curl -X POST "{host_url}/" -d "Hallo Welt" -o output.wav
+
+# Stimme wechseln
+curl -X POST "{host_url}/voice" \
   -H "Content-Type: application/json" \
   -d '{{"link": "de_DE-thorsten-high", "sentence_silence": 1.5}}'</pre>
 
