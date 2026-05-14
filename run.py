@@ -564,16 +564,36 @@ fetch('{host_url}/voice')
 # ---------------------------------------------------------------------------
 
 def _load_denglisch() -> dict[str, str]:
-    """Load denglisch.json from the model folder."""
+    """Load denglisch.json from the model folder.
+
+    Wenn die Datei nicht existiert, wird sie mit Standard-Einträgen
+    angelegt (Jarvis → Tscharwis, Gigabyte → Gigabait).
+    """
     global _denglisch_map
     if _denglisch_map is not None:
         return _denglisch_map
     folder = os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
     path = os.path.join(folder, "denglisch.json")
+
+    _DEFAULT_DENGLISCH = {
+        "Jarvis": "Tscharwis",
+        "Gigabyte": "Gigabait",
+    }
+
     if not os.path.exists(path):
-        _LOGGER.info("No denglisch.json found in %s — Denglisch deaktiviert", folder)
-        _denglisch_map = {}
+        _LOGGER.info("denglisch.json nicht gefunden — erstelle mit Standardwerten in %s", path)
+        try:
+            os.makedirs(folder, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(_DEFAULT_DENGLISCH, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+            _denglisch_map = dict(_DEFAULT_DENGLISCH)
+            _LOGGER.info("denglisch.json angelegt mit %d Einträgen", len(_denglisch_map))
+        except Exception as exc:
+            _LOGGER.warning("Konnte denglisch.json nicht anlegen: %s", exc)
+            _denglisch_map = {}
         return _denglisch_map
+
     try:
         with open(path, "r", encoding="utf-8") as f:
             _denglisch_map = json.load(f)
