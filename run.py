@@ -520,53 +520,6 @@ GET  /health   → Status + Version + CUDA (JSON)</pre>
 </table>
 <p style="color:#888;font-size:13px;">Die Samplerate wird vom Piper-Modell vorgegeben. <code>upsample=true</code> skaliert auf ≥22kHz hoch.</p>
 
-<h3 style="color:#a8d8ea;">Stimme wechseln</h3>
-<pre>POST /voice
-Content-Type: application/json
-
-{{
-  "link": "de_DE-thorsten-high",
-  "sentence_silence": 1.5,
-  "speaker_id": 0,
-  "length_scale": 1.1
-}}</pre>
-<p>
-  <code>link</code> kann sein:<br>
-  • HuggingFace-URL (z.B. <code>https://huggingface.co/rhasspy/piper-voices/.../de_DE-thorsten-high.onnx</code>)<br>
-  • Dateiname aus der lokalen Liste (siehe <a href="{host_url}/models">GET /models</a>)<br>
-  • Kurzname (z.B. <code>de_DE-thorsten-high</code>)
-</p>
-
-<h3 style="color:#a8d8ea;">Aktuelle Konfiguration abfragen</h3>
-<pre>GET  /voice   → JSON mit aktuellem Modell, Parametern, Cache-Status</pre>
-
-<h3 style="color:#a8d8ea;">Verfügbare Modelle auflisten</h3>
-<pre>GET  /models  → JSON mit lokalen Dateien + bekannten Piper-Voices</pre>
-
-<h3 style="color:#a8d8ea;">Health-Check</h3>
-<pre>GET  /health  → {"status": "ok", "version": "…", "cuda": true/false}</pre>
-
-<h3 style="color:#a8d8ea;">Kurz-Referenz (curl)</h3>
-<pre># WAV (Standard)
-curl -o output.wav "{host_url}/?text=Hallo+Welt"
-
-# OGG mit Parametern
-curl -o output.ogg "{host_url}/?text=Hallo&amp;length_scale=1.2&amp;sentence_silence=0.3&amp;format=ogg"
-
-# MP3
-curl -o output.mp3 "{host_url}/?text=Hallo+Welt&amp;format=mp3"
-
-# Opus
-curl -o output.opus "{host_url}/?text=Hallo+Welt&amp;format=opus"
-
-# POST (Text im Body)
-curl -X POST "{host_url}/" -d "Hallo Welt" -o output.wav
-
-# Stimme wechseln
-curl -X POST "{host_url}/voice" \
-  -H "Content-Type: application/json" \
-  -d '{{"link": "de_DE-thorsten-high", "sentence_silence": 1.5}}'</pre>
-
 <!-- ─── Current config ─── -->
 <h2>Aktuelle Konfiguration</h2>
 <pre id="config-display">Lade…</pre>
