@@ -533,7 +533,7 @@ GET  /health   → Status + Version + CUDA (JSON)</pre>
 <tr><td style="padding:4px 8px;"><code>length_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sprechgeschwindigkeit (1.0 = normal)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
-<tr><td style="padding:4px 8px;"><code>denglisch</code></td><td style="padding:4px 8px;">bool / str</td><td style="padding:4px 8px;"><code>true</code> = gecachte Ersetzungen anwenden, <code>force</code> = neuladen von Platte + anwenden, <code>false</code> (oder weglassen) = deaktiviert</td></tr>
+<tr><td style="padding:4px 8px;"><code>denglisch</code></td><td style="padding:4px 8px;">bool / str</td><td style="padding:4px 8px;"><code>true</code> = gecachte Ersetzungen anwenden, <code>force</code> = neuladen von Platte + anwenden, <code>false</code> (oder weglassen) = deaktiviert. Keys in denglisch.json unterstützen Wildcards: <code>*byte</code> matcht Endungen (Megabyte → Megabait), <code>Break*</code> matcht Anfänge (Breakfast → Briihckfast). Keys ohne Wildcard haben Vorrang.</td></tr>
 </table>
 
 <h3 style="color:#a8d8ea;">Output-Format</h3>
@@ -627,14 +627,39 @@ def _load_denglisch(force_reload: bool = False) -> dict[str, str]:
 def _apply_denglisch(text: str, dmap: dict[str, str]) -> str:
     """Apply denglisch word replacements to *text*.
 
-    Ersetzt jedes Wort aus *dmap* (case-insensitive, ganzwörtlich) im Text.
+    Keys können Wildcards enthalten:
+      - ``*suffix`` → matcht Wörter die auf *suffix* enden (Präfix bleibt)
+      - ``prefix*`` → matcht Wörter die mit *prefix* beginnen (Suffix bleibt)
+      - ``wort`` → matcht ganze Wörter (bisheriges Verhalten)
+
+    Keys ohne Wildcard haben Vorrang vor Wildcard-Keys.
+    Innerhalb gleicher Priorität: längere Keys zuerst.
     """
     if not dmap:
         return text
     import re
-    # Längere Einträge zuerst, damit z.B. "Backup-Server" vor "Backup" matcht
-    for orig, repl in sorted(dmap.items(), key=lambda x: -len(x[0])):
-        text = re.sub(r'\b' + re.escape(orig) + r'\b', repl, text, flags=re.IGNORECASE)
+
+    def sort_key(item):
+        key = item[0]
+        has_wildcard = key.startswith("*") or key.endswith("*")
+        return (0 if has_wildcard else -1, -len(key))
+    # non-wildcard keys zuerst, innerhalb Gruppe längere zuerst
+
+    for orig, repl in sorted(dmap.items(), key=sort_key):
+        if orig.startswith("*"):
+            # *suffix — Wörter die auf suffix enden, Präfix bleibt
+            suffix = orig[1:]
+            pattern = r"\b(\w+)" + re.escape(suffix) + r"\b"
+            replacement = r"\1" + repl
+        elif orig.endswith("*"):
+            # prefix* — Wörter die mit prefix beginnen, Suffix bleibt
+            prefix = orig[:-1]
+            pattern = r"\b" + re.escape(prefix) + r"(\w*)\b"
+            replacement = repl + r"\1"
+        else:
+            pattern = r"\b" + re.escape(orig) + r"\b"
+            replacement = repl
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
 
