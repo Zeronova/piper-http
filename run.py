@@ -471,7 +471,7 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
     if (sid) params.set('speaker_id', sid);
     if (fmt) params.set('format', fmt);
     // Checkboxen
-    if (document.getElementById('denglisch').checked) params.set('denglisch', 'true');
+    if (document.getElementById('denglisch').checked) params.set('denglisch', 'force');
     if (document.getElementById('upsample').checked) params.set('upsample', 'true');
     // Audio im Browser abspielen statt Download
     var audio = document.getElementById('audio-player');
