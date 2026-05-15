@@ -533,7 +533,7 @@ GET  /health   → Status + Version + CUDA (JSON)</pre>
 <tr><td style="padding:4px 8px;"><code>length_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sprechgeschwindigkeit (1.0 = normal)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
-<tr><td style="padding:4px 8px;"><code>denglisch</code></td><td style="padding:4px 8px;">bool</td><td style="padding:4px 8px;">Wort-Ersetzungen aus <code>denglisch.json</code> anwenden (<code>true</code>/<code>false</code>)</td></tr>
+<tr><td style="padding:4px 8px;"><code>denglisch</code></td><td style="padding:4px 8px;">bool / str</td><td style="padding:4px 8px;"><code>true</code> = gecachte Ersetzungen anwenden, <code>force</code> = neuladen von Platte + anwenden, <code>false</code> (oder weglassen) = deaktiviert</td></tr>
 </table>
 
 <h3 style="color:#a8d8ea;">Output-Format</h3>
@@ -579,14 +579,16 @@ fetch('{host_url}/voice')
 # Denglisch word replacements
 # ---------------------------------------------------------------------------
 
-def _load_denglisch() -> dict[str, str]:
+def _load_denglisch(force_reload: bool = False) -> dict[str, str]:
     """Load denglisch.json from the model folder.
 
     Wenn die Datei nicht existiert, wird sie mit Standard-Einträgen
     angelegt (Jarvis → Tscharwis, Gigabyte → Gigabait).
+
+    *force_reload=True* ignoriert den Cache und liest von Platte.
     """
     global _denglisch_map
-    if _denglisch_map is not None:
+    if not force_reload and _denglisch_map is not None:
         return _denglisch_map
     folder = os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
     path = os.path.join(folder, "denglisch.json")
@@ -613,7 +615,9 @@ def _load_denglisch() -> dict[str, str]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             _denglisch_map = json.load(f)
-        _LOGGER.info("Denglisch geladen: %d Einträge aus %s", len(_denglisch_map), path)
+        _LOGGER.info("Denglisch %s: %d Einträge aus %s",
+                     "neugeladen" if force_reload else "geladen",
+                     len(_denglisch_map), path)
     except Exception as exc:
         _LOGGER.warning("Fehler beim Laden von denglisch.json: %s", exc)
         _denglisch_map = {}
@@ -673,7 +677,12 @@ def handle_synthesize():
 
     # ── Denglisch word replacements ──
     denglisch_param = request.args.get("denglisch", "").strip().lower()
-    if denglisch_param in ("true", "1", "yes"):
+    if denglisch_param == "force":
+        dmap = _load_denglisch(force_reload=True)
+        if dmap:
+            text = _apply_denglisch(text, dmap)
+            _LOGGER.debug("Denglisch force-reloaded & applied → %s", text[:80])
+    elif denglisch_param in ("true", "1", "yes"):
         dmap = _load_denglisch()
         if dmap:
             text = _apply_denglisch(text, dmap)
