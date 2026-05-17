@@ -4,7 +4,7 @@ ARG BUILD_DATE
 
 # Python 3.10 + pip + git (Ubuntu 22.04 default)
 RUN apt update && apt install -y \
-    python3 python3-pip python3-venv \
+    python3 python3-pip python3-venv python-is-python3 \
     git ffmpeg espeak-ng \
     && apt clean
 
