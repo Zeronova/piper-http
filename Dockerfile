@@ -23,7 +23,7 @@ RUN python3 -m pip uninstall -y onnxruntime 2>/dev/null; \
     python3 -m pip install onnxruntime-gpu --no-cache-dir
 
 # Weitere Hilfsmittel
-RUN python3 -m pip install wget
+RUN python3 -m pip install wget num2words --no-cache-dir
 
 # App-Dateien
 WORKDIR /app

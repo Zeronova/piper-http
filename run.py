@@ -57,8 +57,8 @@ _model_path: str | None = None
 _synth_args: dict = {}
 _startup_env: dict = {}  # snapshot of env vars for the web UI
 
-# Denglisch word replacements (geladen aus denglisch.json im Model-Verzeichnis)
-_denglisch_map: dict[str, str] | None = None
+# replacer — word replacements (geladen aus replacer.json, Fallback: denglisch.json)
+_replacer_map: dict[str, str] | None = None
 
 
 def download_model(link: str, target_folder: str) -> str:
@@ -415,9 +415,9 @@ def _render_html() -> str:
 
   <div style="display:flex;gap:24px;margin-top:12px;align-items:center;">
     <label style="font-size:14px;cursor:pointer;display:flex;align-items:center;gap:4px;">
-      <input type="checkbox" name="denglisch" id="denglisch"
+      <input type="checkbox" name="replacer" id="replacer"
              style="width:18px;height:18px;accent-color:#00d4aa;">
-      Denglisch
+      Replacer
     </label>
     <label style="font-size:14px;cursor:pointer;display:flex;align-items:center;gap:4px;">
       <input type="checkbox" name="upsample" id="upsample"
@@ -471,7 +471,7 @@ document.getElementById('synth-form').addEventListener('submit', function(e) {{
     if (sid) params.set('speaker_id', sid);
     if (fmt) params.set('format', fmt);
     // Checkboxen
-    if (document.getElementById('denglisch').checked) params.set('denglisch', 'force');
+    if (document.getElementById('replacer').checked) params.set('replacer', 'force');
     if (document.getElementById('upsample').checked) params.set('upsample', 'true');
     // Audio im Browser abspielen statt Download
     var audio = document.getElementById('audio-player');
@@ -533,7 +533,8 @@ GET  /health   → Status + Version + CUDA (JSON)</pre>
 <tr><td style="padding:4px 8px;"><code>length_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Sprechgeschwindigkeit (1.0 = normal)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_scale</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Generator-Rauschen (Piper-Standard)</td></tr>
 <tr><td style="padding:4px 8px;"><code>noise_w</code></td><td style="padding:4px 8px;">float</td><td style="padding:4px 8px;">Phonem-Breiten-Rauschen</td></tr>
-<tr><td style="padding:4px 8px;"><code>denglisch</code></td><td style="padding:4px 8px;">bool / str</td><td style="padding:4px 8px;"><code>true</code> = gecachte Ersetzungen anwenden, <code>force</code> = neuladen von Platte + anwenden, <code>false</code> (oder weglassen) = deaktiviert. Keys in denglisch.json unterstützen Wildcards: <code>*byte</code> matcht Endungen (Megabyte → Megabait), <code>Break*</code> matcht Anfänge (Breakfast → Briihckfast). Keys ohne Wildcard haben Vorrang.</td></tr>
+<tr><td style="padding:4px 8px;"><code>replacer</code></td><td style="padding:4px 8px;">bool / str</td><td style="padding:4px 8px;"><code>true</code> = gecachte Ersetzungen anwenden, <code>force</code> = neuladen von Platte + anwenden, <code>false</code> (oder weglassen) = deaktiviert. Keys in replacer.json unterstützen Wildcards: <code>*byte</code> matcht Endungen (Megabyte → Megabait), <code>Break*</code> matcht Anfänge (Breakfast → Briihckfast). Keys ohne Wildcard haben Vorrang.</td></tr>
+<tr><td style="padding:4px 8px;"><code>num2words</code></td><td style="padding:4px 8px;">bool</td><td style="padding:4px 8px;"><code>true</code> = Datumsangaben und Ordnungszahlen werden in gesprochenen Text umgewandelt (z.B. <code>05.07.2026</code> → <em>fünfter siebter zweitausendsiebenundzwanzig</em>, <code>5. Mai</code> → <em>fünfter Mai</em>).</td></tr>
 </table>
 
 <h3 style="color:#a8d8ea;">Output-Format</h3>
@@ -576,56 +577,70 @@ fetch('{host_url}/voice')
 
 
 # ---------------------------------------------------------------------------
-# Denglisch word replacements
+# replacer — word replacements (formerly denglisch)
 # ---------------------------------------------------------------------------
 
-def _load_denglisch(force_reload: bool = False) -> dict[str, str]:
-    """Load denglisch.json from the model folder.
+def _load_replacer(force_reload: bool = False) -> dict[str, str]:
+    """Load replacer.json from the model folder.
 
-    Wenn die Datei nicht existiert, wird sie mit Standard-Einträgen
-    angelegt (Jarvis → Tscharwis, Gigabyte → Gigabait).
+    Falls replacer.json nicht existiert, wird als Fallback denglisch.json
+    geladen. Existiert auch die nicht, wird replacer.json mit
+    Standard-Einträgen angelegt (Jarvis → Tscharwis).
 
     *force_reload=True* ignoriert den Cache und liest von Platte.
     """
-    global _denglisch_map
-    if not force_reload and _denglisch_map is not None:
-        return _denglisch_map
+    global _replacer_map
+    if not force_reload and _replacer_map is not None:
+        return _replacer_map
     folder = os.environ.get("MODEL_TARGET_FOLDER", "/app/models")
-    path = os.path.join(folder, "denglisch.json")
 
-    _DEFAULT_DENGLISCH = {
+    replacer_path = os.path.join(folder, "replacer.json")
+    legacy_path = os.path.join(folder, "denglisch.json")
+
+    _DEFAULT_REPLACER = {
         "Jarvis": "Tscharwis",
-        "Gigabyte": "Gigabait",
     }
 
-    if not os.path.exists(path):
-        _LOGGER.info("denglisch.json nicht gefunden — erstelle mit Standardwerten in %s", path)
+    # Try replacer.json first, then denglisch.json as fallback, then create new
+    if os.path.exists(replacer_path):
+        path = replacer_path
+        source_name = "replacer.json"
+    elif os.path.exists(legacy_path):
+        path = legacy_path
+        source_name = "denglisch.json (Legacy)"
+    else:
+        path = replacer_path
+        source_name = None
+
+    if source_name:
         try:
-            os.makedirs(folder, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(_DEFAULT_DENGLISCH, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-            _denglisch_map = dict(_DEFAULT_DENGLISCH)
-            _LOGGER.info("denglisch.json angelegt mit %d Einträgen", len(_denglisch_map))
+            with open(path, "r", encoding="utf-8") as f:
+                _replacer_map = json.load(f)
+            _LOGGER.info("Replacer %s: %d Einträge aus %s",
+                         "neugeladen" if force_reload else "geladen",
+                         len(_replacer_map), source_name)
         except Exception as exc:
-            _LOGGER.warning("Konnte denglisch.json nicht anlegen: %s", exc)
-            _denglisch_map = {}
-        return _denglisch_map
+            _LOGGER.warning("Fehler beim Laden von replacer.json: %s", exc)
+            _replacer_map = {}
+        return _replacer_map
 
+    # Neither file exists → create replacer.json with defaults
+    _LOGGER.info("replacer.json nicht gefunden — erstelle mit Standardwerten in %s", path)
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            _denglisch_map = json.load(f)
-        _LOGGER.info("Denglisch %s: %d Einträge aus %s",
-                     "neugeladen" if force_reload else "geladen",
-                     len(_denglisch_map), path)
+        os.makedirs(folder, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(_DEFAULT_REPLACER, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        _replacer_map = dict(_DEFAULT_REPLACER)
+        _LOGGER.info("replacer.json angelegt mit %d Einträgen", len(_replacer_map))
     except Exception as exc:
-        _LOGGER.warning("Fehler beim Laden von denglisch.json: %s", exc)
-        _denglisch_map = {}
-    return _denglisch_map
+        _LOGGER.warning("Konnte replacer.json nicht anlegen: %s", exc)
+        _replacer_map = {}
+    return _replacer_map
 
 
-def _apply_denglisch(text: str, dmap: dict[str, str]) -> str:
-    """Apply denglisch word replacements to *text*.
+def _apply_replacer(text: str, dmap: dict[str, str]) -> str:
+    """Apply word replacements to *text*.
 
     Keys können Wildcards enthalten:
       - ``*suffix`` → matcht Wörter die auf *suffix* enden (Präfix bleibt)
@@ -660,6 +675,54 @@ def _apply_denglisch(text: str, dmap: dict[str, str]) -> str:
             pattern = r"\b" + re.escape(orig) + r"\b"
             replacement = repl
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def _apply_num2words(text: str) -> str:
+    """Wandle Datumsangaben und Ordnungszahlen in gesprochenen Text um.
+
+    - ``05.07.2026`` → *fünfter siebter zweitausendsiebenundzwanzig*
+    - ``5. Mai`` → *fünfter Mai*
+    - ``5. Rad am Wagen`` → *fünfte Rad am Wagen* (allgemeine Ordinalzahlen)
+    """
+    try:
+        from num2words import num2words
+    except ImportError:
+        _LOGGER.warning("num2words nicht installiert — überspringe Preprocessing")
+        return text
+
+    import re
+
+    # 1. Reines Datum: Tag.Monat.Jahr (z.B. 05.07.2026)
+    datum_muster = r'\b0*([1-9]|[12]\d|3[01])\.(?:0*([1-9]|1[0-2]))\.(\d{4})\b'
+
+    def datum_ersetzen(match):
+        tag = num2words(int(match.group(1)), lang='de', to='ordinal')
+        monat = num2words(int(match.group(2)), lang='de', to='ordinal')
+        jahr = num2words(int(match.group(3)), lang='de', to='year')
+        return f"{tag} {monat} {jahr}"
+
+    text = re.sub(datum_muster, datum_ersetzen, text)
+
+    # 2. Zahl vor Monatsname: z.B. 5. Mai
+    monate = "(Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)"
+    monat_text_muster = rf'\b0*([1-9]|[12]\d|3[01])\.\s*{monate}'
+
+    def monat_text_ersetzen(match):
+        tag = num2words(int(match.group(1)), lang='de', to='ordinal')
+        return f"{tag} {match.group(2)}"
+
+    text = re.sub(monat_text_muster, monat_text_ersetzen, text)
+
+    # 3. Andere Ordinalzahlen: "5. Rad", "3. Etage" etc.
+    #    Überspringt aber explizit Uhrzeiten wie "9:30" und Punkte in Zahlen wie "3.14"
+    rest_muster = r'(?<!\d)(\d+)\.(?!\d|\s*\d)'
+
+    def rest_ersetzen(match):
+        return num2words(int(match.group(1)), lang='de', to='ordinal')
+
+    text = re.sub(rest_muster, rest_ersetzen, text)
+
     return text
 
 
@@ -700,18 +763,24 @@ def handle_synthesize():
             return _render_html()
         return "No text provided", 400
 
-    # ── Denglisch word replacements ──
-    denglisch_param = request.args.get("denglisch", "").strip().lower()
-    if denglisch_param == "force":
-        dmap = _load_denglisch(force_reload=True)
+    # ── replacer word replacements ──
+    replacer_param = (request.args.get("replacer") or "").strip().lower()
+    if replacer_param == "force":
+        dmap = _load_replacer(force_reload=True)
         if dmap:
-            text = _apply_denglisch(text, dmap)
-            _LOGGER.debug("Denglisch force-reloaded & applied → %s", text[:80])
-    elif denglisch_param in ("true", "1", "yes"):
-        dmap = _load_denglisch()
+            text = _apply_replacer(text, dmap)
+            _LOGGER.debug("Replacer force-reloaded & applied → %s", text[:80])
+    elif replacer_param in ("true", "1", "yes"):
+        dmap = _load_replacer()
         if dmap:
-            text = _apply_denglisch(text, dmap)
-            _LOGGER.debug("Denglisch applied → %s", text[:80])
+            text = _apply_replacer(text, dmap)
+            _LOGGER.debug("Replacer applied → %s", text[:80])
+
+    # ── num2words: Datum/Ordinalzahlen → ausgeschrieben ──
+    num2words_param = request.args.get("num2words", "").strip().lower()
+    if num2words_param in ("true", "1", "yes"):
+        text = _apply_num2words(text)
+        _LOGGER.debug("num2words applied → %s", text[:80])
 
     # ── Merge per-request override params ──
     overrides = {}
